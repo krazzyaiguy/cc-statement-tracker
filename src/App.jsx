@@ -591,6 +591,12 @@ export default function App() {
   useEffect(()=>{ls.set(PROCESSED_KEY,processedIds);},[processedIds]);
   useEffect(()=>{if(settings)ls.set(SETTINGS_KEY,settings);},[settings]);
 
+  // Hooks must be before any early return
+  const handleNewRecords=useCallback((newRecs)=>{
+    setRecords(prev=>{const ex=new Set(prev.map(r=>r.id));return[...prev,...newRecs.filter(r=>!ex.has(r.id))];});
+  },[]);
+  const handleProcessed=useCallback((id)=>setProcessedIds(prev=>prev.includes(id)?prev:[...prev,id]),[]);
+
   if (!settings) return <SetupScreen onSave={setSettings}/>;
 
   const addFiles=(newFiles)=>{
@@ -632,10 +638,6 @@ export default function App() {
     processingRef.current=false; setProcessing(false);
   };
 
-  const handleNewRecords=useCallback((newRecs)=>{
-    setRecords(prev=>{const ex=new Set(prev.map(r=>r.id));return[...prev,...newRecs.filter(r=>!ex.has(r.id))];});
-  },[]);
-  const handleProcessed=useCallback((id)=>setProcessedIds(prev=>prev.includes(id)?prev:[...prev,id]),[]);
   const togglePaid=(id)=>setRecords(prev=>prev.map(r=>r.id===id?{...r,paid:!r.paid}:r));
   const deleteRecord=(id)=>setRecords(prev=>prev.filter(r=>r.id!==id));
 
@@ -760,3 +762,4 @@ export default function App() {
     </div>
   );
 }
+
