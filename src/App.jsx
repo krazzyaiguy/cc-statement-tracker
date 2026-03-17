@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GEMINI_MODEL  = "gemini-2.0-flash";
+const GEMINI_MODEL  = "gemini-2.5-flash-lite";
 const RECORDS_KEY   = "cc_records_v3";
 const VAULT_KEY     = "cc_vault_v2";          // upgraded schema
 const SETTINGS_KEY  = "cc_settings_v1";
