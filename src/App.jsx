@@ -405,7 +405,7 @@ function GmailSyncPanel({ settings, vault, onNewRecords, processedIds, onProcess
       const newRecords=[];
       for (const { id } of fresh) {
         try {
-          const { subject, from, date, pdfParts, bodyText } = await fetchEmailWithAttachments(id, gmailToken);
+          const { subject, date, pdfParts, bodyText } = await fetchEmailWithAttachments(id, gmailToken); // eslint-disable-line
           log(`📧 "${subject}"`);
           if (pdfParts.length===0) { log("  ↳ No PDF attached, skipping.","warn"); onProcessed(id); continue; }
 
@@ -762,4 +762,3 @@ export default function App() {
     </div>
   );
 }
-
