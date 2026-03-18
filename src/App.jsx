@@ -730,32 +730,41 @@ export default function App(){
       const unsub=onAuthChange(async(u)=>{
         setUser(u);setAuthReady(true);
         if(u){
-          // Load settings from Firebase
-          const remoteSettings=await loadSettings(u.uid);
-          if(remoteSettings)setSettings(s=>({...s,...remoteSettings}));
-          // Load processed IDs
-          const ids=await loadProcessedIds(u.uid);
-          setProcessedIds(ids);
-          // Listen to vault & records in real-time
+          try{const remoteSettings=await loadSettings(u.uid);if(remoteSettings)setSettings(s=>({...s,...remoteSettings}));}catch{}
+          try{const ids=await loadProcessedIds(u.uid);setProcessedIds(ids);}catch{}
+
+          // SAFE MERGE: upload local data to Firebase first, then start listening
+          // This prevents Firebase overwriting local data with empty arrays
+          const mergeAndListen = async (localKey, firestoreFn, listenerFn, setter) => {
+            try {
+              const localData = JSON.parse(localStorage.getItem(localKey)||'[]');
+              if(localData.length>0){
+                // Upload local items that don't exist in Firebase yet
+                for(const item of localData){
+                  try{ await firestoreFn(u.uid, item); }catch{}
+                }
+                localStorage.removeItem(localKey); // clear after upload
+              }
+            } catch{}
+            // Now start real-time listener
+            return listenerFn(u.uid, setter);
+          };
+
           if(unsubscribeRef.current.vault) unsubscribeRef.current.vault();
-          if(unsubscribeRef.current.records) unsubscribeRef.current.records();
-          unsubscribeRef.current.vault=listenVault(u.uid,setVault);
           if(unsubscribeRef.current.people) unsubscribeRef.current.people();
-          unsubscribeRef.current.people=listenPeople(u.uid,async(remotePeople)=>{
-            // Merge: upload any locally-saved people that aren't in Firebase yet
-            const localPeople=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');
-            const remoteIds=new Set(remotePeople.map(p=>p.id));
-            const toUpload=localPeople.filter(p=>!remoteIds.has(p.id));
-            for(const p of toUpload){ try{ await addPerson(u.uid,p); }catch{} }
-            if(toUpload.length>0) localStorage.removeItem('cc_people_v1'); // clean up after upload
-            setPeople(remotePeople);
-          });
-          unsubscribeRef.current.records=listenRecords(u.uid,setRecords);
-        } else {
-          // Clear listeners
-          if(unsubscribeRef.current.vault) unsubscribeRef.current.vault();
           if(unsubscribeRef.current.records) unsubscribeRef.current.records();
-          setVault([]); setRecords([]); setPeople([]);
+
+          unsubscribeRef.current.vault   = await mergeAndListen('cc_vault_v2',   addVaultEntry,  listenVault,   setVault);
+          unsubscribeRef.current.people  = await mergeAndListen('cc_people_v1',  addPerson,      listenPeople,  setPeople);
+          unsubscribeRef.current.records = listenRecords(u.uid, setRecords);
+        } else {
+          if(unsubscribeRef.current.vault)   unsubscribeRef.current.vault();
+          if(unsubscribeRef.current.records) unsubscribeRef.current.records();
+          if(unsubscribeRef.current.people)  unsubscribeRef.current.people();
+          // Restore from localStorage when signed out
+          try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');setVault(Array.isArray(v)?v:[]);}catch{setVault([]);}
+          try{const p=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');setPeople(Array.isArray(p)?p:[]);}catch{setPeople([]);}
+          setRecords([]);
         }
       });
       return ()=>{
@@ -826,14 +835,33 @@ export default function App(){
   const handleFirebaseSignOut=async()=>{ await signOutUser(); setUser(null); ls.del("cc_gmail_token"); ls.del("cc_gmail_email"); };
 
   // Vault operations
-  const handleAddVault    =async(entry)=>{ if(user){await addVaultEntry(user.uid,entry);}else setVault(p=>[...p,entry]); };
+  const handleAddVault    =async(entry)=>{
+    setVault(p=>[...p,entry]);
+    try{const curr=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');localStorage.setItem('cc_vault_v2',JSON.stringify([...curr,entry]));}catch{}
+    if(user){ try{ await addVaultEntry(user.uid,entry); }catch(e){ console.error("Firebase addVault failed:",e); } }
+  };
   const handleUpdateVault =async(fid,data)=>{ if(user){await updateVaultEntry(user.uid,fid,data);}else setVault(p=>p.map(e=>(e.firestoreId||e.id)===fid?{...e,...data}:e)); };
   const handleDeleteVault =async(fid)=>{ if(user){await deleteVaultEntry(user.uid,fid);}else setVault(p=>p.filter(e=>(e.firestoreId||e.id)!==fid)); };
 
   // People operations
-  const handleAddPerson    =async(p)=>{ if(user){await addPerson(user.uid,p);}else setPeople(prev=>[...prev,p]); };
-  const handleUpdatePerson =async(fid,data)=>{ if(user){await updatePerson(user.uid,fid,data);}else setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p)); };
-  const handleDeletePerson =async(fid)=>{ if(user){await deletePerson(user.uid,fid);}else setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid)); };
+  const handleAddPerson    =async(p)=>{
+    // Always update local state immediately
+    setPeople(prev=>[...prev,p]);
+    // Save to localStorage as backup
+    try{const curr=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');localStorage.setItem('cc_people_v1',JSON.stringify([...curr,p]));}catch{}
+    // Also save to Firebase if signed in
+    if(user){ try{ await addPerson(user.uid,p); }catch(e){ console.error("Firebase addPerson failed:",e); } }
+  };
+  const handleUpdatePerson =async(fid,data)=>{
+    setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p));
+    try{const curr=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');localStorage.setItem('cc_people_v1',JSON.stringify(curr.map(p=>p.id===fid?{...p,...data}:p)));}catch{}
+    if(user){ try{ await updatePerson(user.uid,fid,data); }catch(e){ console.error("Firebase updatePerson failed:",e); } }
+  };
+  const handleDeletePerson =async(fid)=>{
+    setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid));
+    try{const curr=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');localStorage.setItem('cc_people_v1',JSON.stringify(curr.filter(p=>p.id!==fid)));}catch{}
+    if(user){ try{ await deletePerson(user.uid,fid); }catch(e){ console.error("Firebase deletePerson failed:",e); } }
+  };
 
   // Record operations
   const handleTogglePaid=async(r)=>{
