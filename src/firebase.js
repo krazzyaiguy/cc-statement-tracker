@@ -63,7 +63,6 @@ export function onAuthChange(callback) {
 // ── Firestore helpers ─────────────────────────────────────────────────────────
 // All user data lives under: /users/{uid}/...
 
-function userRef(uid)         { return doc(db, "users", uid); }
 function vaultCol(uid)        { return collection(db, "users", uid, "vault"); }
 function recordsCol(uid)      { return collection(db, "users", uid, "records"); }
 function settingsDoc(uid)     { return doc(db, "users", uid, "meta", "settings"); }
