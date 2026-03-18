@@ -11,7 +11,6 @@ import {
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const GEMINI_MODEL   = "gemini-1.5-flash-latest";
 const SETTINGS_KEY   = "cc_settings_v2";   // localStorage fallback for settings only
-const PEOPLE_KEY     = "cc_people_v1";     // cardholder registry
 const GMAIL_SCOPES   = "https://www.googleapis.com/auth/gmail.readonly";
 
 const EXTRACTION_PROMPT = `You are a credit card statement parser. Extract key billing information.
@@ -392,42 +391,61 @@ function VaultPanel({vault,uid,onAdd,onUpdate,onDelete}){
 
 // ─── PEOPLE PANEL (Cardholder Registry) ──────────────────────────────────────
 function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
+  // "add" form state
   const[fullName,setFullName]=useState("");
-  const[dob,setDob]=useState("");           // DD/MM/YYYY
+  const[dob,setDob]=useState("");
   const[cards,setCards]=useState([{last4:"",bankName:""}]);
   const[saving,setSaving]=useState(false);
+  const[preview,setPreview]=useState(null);
+  // "edit" state
+  const[editing,setEditing]=useState(null); // firestoreId|id of person being edited
+  const[editName,setEditName]=useState("");
+  const[editDob,setEditDob]=useState("");
+  const[editCards,setEditCards]=useState([]);
+  const[editSaving,setEditSaving]=useState(false);
   const[expanded,setExpanded]=useState(null);
-  const[editMode,setEditMode]=useState(null);
-  const[preview,setPreview]=useState(null); // show generated passwords
 
+  // Add form helpers
   const addCard=()=>setCards(c=>[...c,{last4:"",bankName:""}]);
   const removeCard=(i)=>setCards(c=>c.filter((_,j)=>j!==i));
-  const updateCard=(i,field,val)=>setCards(c=>c.map((card,j)=>j===i?{...card,[field]:val}:card));
+  const updateCard=(i,f,v)=>setCards(c=>c.map((card,j)=>j===i?{...card,[f]:v}:card));
 
   const handleAdd=async()=>{
     if(!fullName.trim()||!dob.trim())return;
     setSaving(true);
-    const person={
-      id:Date.now().toString(),
-      fullName:fullName.trim().toUpperCase(),
-      dob:dob.trim(),
-      cards:cards.filter(c=>c.last4.trim()),
-    };
-    await onAdd(person);
+    await onAdd({id:Date.now().toString(),fullName:fullName.trim().toUpperCase(),dob:dob.trim(),cards:cards.filter(c=>c.last4.trim())});
     setFullName("");setDob("");setCards([{last4:"",bankName:""}]);setSaving(false);setPreview(null);
   };
 
   const showPreview=()=>{
     if(!fullName.trim()||!dob.trim())return;
-    const person={fullName:fullName.trim().toUpperCase(),dob:dob.trim(),cards:cards.filter(c=>c.last4.trim())};
-    const pwds=generatePasswords(person,cards[0]?.last4||"");
-    setPreview(pwds.slice(0,12));
+    setPreview(generatePasswords({fullName:fullName.trim().toUpperCase(),dob:dob.trim(),cards:cards.filter(c=>c.last4.trim())},cards[0]?.last4||"").slice(0,16));
+  };
+
+  // Edit helpers
+  const startEdit=(person)=>{
+    setEditing(person.firestoreId||person.id);
+    setEditName(person.fullName||"");
+    setEditDob(person.dob||"");
+    setEditCards(person.cards?.length?[...person.cards]:[{last4:"",bankName:""}]);
+    setExpanded(null);
+  };
+  const cancelEdit=()=>{setEditing(null);setEditName("");setEditDob("");setEditCards([]);};
+  const addEditCard=()=>setEditCards(c=>[...c,{last4:"",bankName:""}]);
+  const removeEditCard=(i)=>setEditCards(c=>c.filter((_,j)=>j!==i));
+  const updateEditCard=(i,f,v)=>setEditCards(c=>c.map((card,j)=>j===i?{...card,[f]:v}:card));
+
+  const handleUpdate=async(fid)=>{
+    if(!editName.trim()||!editDob.trim())return;
+    setEditSaving(true);
+    await onUpdate(fid,{fullName:editName.trim().toUpperCase(),dob:editDob.trim(),cards:editCards.filter(c=>c.last4.trim())});
+    cancelEdit();setEditSaving(false);
   };
 
   return(
     <div>
       <p style={{color:"#475569",fontSize:12,lineHeight:1.8,marginBottom:20}}>
-        Add cardholders once. The app <strong style={{color:"#94a3b8"}}>auto-generates all password combinations</strong> (name+DOB, name+last4, etc.) and tries them automatically — no manual password entry needed.
+        Add each cardholder once. The app <strong style={{color:"#94a3b8"}}>auto-generates all password combinations</strong> (name+DOB, name+last4digits, etc.) and tries them automatically during Gmail sync.
       </p>
 
       {/* Add form */}
@@ -440,46 +458,31 @@ function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
           </div>
           <div>
             <label style={S.label}>Date of Birth *</label>
-            <input value={dob} onChange={e=>setDob(e.target.value)} placeholder="DD/MM/YYYY" maxLength={10}
-              style={{...S.input,letterSpacing:"0.1em"}}/>
+            <input value={dob} onChange={e=>setDob(e.target.value)} placeholder="DD/MM/YYYY" maxLength={10} style={{...S.input,letterSpacing:"0.1em"}}/>
           </div>
         </div>
-
-        {/* Cards */}
         <div style={{marginBottom:12}}>
           <label style={{...S.label,marginBottom:8}}>Credit Cards</label>
           {cards.map((card,i)=>(
             <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
-              <div style={{flex:"0 0 110px"}}>
-                <input value={card.last4} onChange={e=>updateCard(i,"last4",e.target.value.replace(/\D/g,"").slice(0,4))}
-                  placeholder="Last 4 digits" maxLength={4}
-                  style={{...S.input,letterSpacing:"0.2em",fontSize:14,fontWeight:700,textAlign:"center"}}/>
-              </div>
-              <div style={{flex:1}}>
-                <input value={card.bankName} onChange={e=>updateCard(i,"bankName",e.target.value)}
-                  placeholder="Bank name (e.g. HDFC)" style={S.input}/>
-              </div>
+              <input value={card.last4} onChange={e=>updateCard(i,"last4",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="Last 4" maxLength={4} style={{...S.input,width:90,letterSpacing:"0.2em",fontSize:14,fontWeight:700,textAlign:"center"}}/>
+              <input value={card.bankName} onChange={e=>updateCard(i,"bankName",e.target.value)} placeholder="Bank name (e.g. HDFC)" style={{...S.input,flex:1}}/>
               {cards.length>1&&<button onClick={()=>removeCard(i)} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>}
             </div>
           ))}
           <button onClick={addCard} style={{background:"none",border:"1px dashed #1e293b",color:"#475569",borderRadius:7,padding:"5px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,marginTop:4}}>+ Add another card</button>
         </div>
-
-        {/* Preview passwords */}
         {preview&&(
           <div style={{background:"#050810",border:"1px solid #0f172a",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
-            <div style={{color:"#60a5fa",fontSize:10,fontWeight:600,marginBottom:8,letterSpacing:"0.06em"}}>🔑 PASSWORDS TO TRY (first 12 of {preview.length}+)</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-              {preview.map((p,i)=>(
-                <span key={i} style={{background:"#1e293b",color:"#94a3b8",padding:"3px 8px",borderRadius:5,fontFamily:"'DM Mono',monospace",fontSize:11}}>{p.pwd}</span>
-              ))}
+            <div style={{color:"#60a5fa",fontSize:10,fontWeight:600,marginBottom:8}}>🔑 SAMPLE PASSWORDS TO TRY ({preview.length} shown)</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {preview.map((p,i)=><span key={i} style={{background:"#1e293b",color:"#94a3b8",padding:"3px 8px",borderRadius:5,fontFamily:"'DM Mono',monospace",fontSize:11}}>{p.pwd}</span>)}
             </div>
           </div>
         )}
-
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={handleAdd} disabled={!fullName.trim()||!dob.trim()||saving} style={S.btn("#1d4ed8",!fullName.trim()||!dob.trim()||saving)}>{saving?"⟳ Saving…":"+ Add Cardholder"}</button>
-          <button onClick={showPreview} disabled={!fullName.trim()||!dob.trim()} style={{...S.btn("#475569",!fullName.trim()||!dob.trim()),background:"none",border:"1px solid #1e293b",color:"#475569"}}>👁 Preview Passwords</button>
+          <button onClick={showPreview} disabled={!fullName.trim()||!dob.trim()} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>👁 Preview Passwords</button>
         </div>
       </div>
 
@@ -487,49 +490,82 @@ function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
       {people.length===0?(
         <div style={{color:"#1e293b",fontSize:12,textAlign:"center",padding:"24px 0"}}>No cardholders added yet.</div>
       ):(
-        people.map(person=>(
-          <div key={person.firestoreId||person.id} style={{...S.card,marginBottom:12,overflow:"hidden"}}>
-            {/* Header */}
-            <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}} onClick={()=>setExpanded(expanded===(person.firestoreId||person.id)?null:(person.firestoreId||person.id))}>
-              <div style={{width:36,height:36,borderRadius:8,background:"linear-gradient(135deg,#1e40af,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff",flexShrink:0}}>
-                {(person.fullName||"?")[0]}
-              </div>
-              <div style={{flex:1}}>
-                <div style={{color:"#e2e8f0",fontWeight:600,fontSize:13}}>{person.fullName}</div>
-                <div style={{color:"#475569",fontSize:10,marginTop:2}}>
-                  DOB: {person.dob} · {(person.cards||[]).length} card{(person.cards||[]).length!==1?"s":""}
-                  {person.cards&&person.cards.length>0&&" · "+person.cards.map(c=>`${c.bankName||"?"} ••••${c.last4}`).join(", ")}
+        people.map(person=>{
+          const pid=person.firestoreId||person.id;
+          const isEditing=editing===pid;
+          const isExpanded=expanded===pid;
+          return(
+            <div key={pid} style={{...S.card,marginBottom:12,overflow:"hidden"}}>
+              {/* Header row */}
+              <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px"}}>
+                <div style={{width:36,height:36,borderRadius:8,background:"linear-gradient(135deg,#1e40af,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"#fff",flexShrink:0,cursor:"pointer"}} onClick={()=>setExpanded(isExpanded?null:pid)}>
+                  {(person.fullName||"?")[0]}
+                </div>
+                <div style={{flex:1,cursor:"pointer"}} onClick={()=>!isEditing&&setExpanded(isExpanded?null:pid)}>
+                  <div style={{color:"#e2e8f0",fontWeight:600,fontSize:13}}>{person.fullName}</div>
+                  <div style={{color:"#475569",fontSize:10,marginTop:2}}>
+                    DOB: {person.dob} · {(person.cards||[]).length} card{(person.cards||[]).length!==1?"s":""}
+                    {(person.cards||[]).length>0&&" · "+(person.cards||[]).map(c=>`${c.bankName||"?"} ••••${c.last4}`).join(", ")}
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                  <span style={{background:"#052e16",color:"#4ade80",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:600}}>~{generatePasswords(person,"").length} combos</span>
+                  <button onClick={()=>isEditing?cancelEdit():startEdit(person)} style={{background:"none",border:`1px solid ${isEditing?"#3b1111":"#1e3a5f"}`,color:isEditing?"#f87171":"#60a5fa",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10}}>{isEditing?"✕ Cancel":"✏ Edit"}</button>
+                  <button onClick={()=>onDelete(pid)} style={{background:"none",border:"none",color:"#334155",cursor:"pointer",fontSize:14,padding:"0 2px"}}>🗑</button>
                 </div>
               </div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <span style={{background:"#052e16",color:"#4ade80",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:600}}>
-                  ~{generatePasswords(person,"").length} combos
-                </span>
-                <span style={{color:"#334155",fontSize:16}}>{expanded===(person.firestoreId||person.id)?"▲":"▼"}</span>
-              </div>
-            </div>
 
-            {/* Expanded: show passwords + delete */}
-            {expanded===(person.firestoreId||person.id)&&(
-              <div style={{borderTop:"1px solid #0f172a",padding:"12px 16px"}}>
-                <div style={{color:"#334155",fontSize:10,fontWeight:600,marginBottom:8,letterSpacing:"0.06em"}}>🔑 AUTO-GENERATED PASSWORDS</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:14}}>
-                  {generatePasswords(person,person.cards?.[0]?.last4||"").slice(0,20).map((p,i)=>(
-                    <span key={i} style={{background:"#0a0e1a",border:"1px solid #1e293b",color:"#94a3b8",padding:"3px 8px",borderRadius:5,fontFamily:"'DM Mono',monospace",fontSize:10}}>{p.pwd}</span>
-                  ))}
-                  {generatePasswords(person,person.cards?.[0]?.last4||"").length>20&&(
-                    <span style={{color:"#334155",fontSize:10,padding:"3px 8px"}}>+{generatePasswords(person,person.cards?.[0]?.last4||"").length-20} more</span>
-                  )}
+              {/* Edit form */}
+              {isEditing&&(
+                <div style={{borderTop:"1px solid #0f172a",padding:"14px 16px",background:"#080c14"}}>
+                  <div style={{color:"#60a5fa",fontSize:10,fontWeight:600,marginBottom:12,letterSpacing:"0.06em"}}>✏ EDIT CARDHOLDER</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                    <div>
+                      <label style={S.label}>Full Name *</label>
+                      <input value={editName} onChange={e=>setEditName(e.target.value.toUpperCase())} style={{...S.input,textTransform:"uppercase"}}/>
+                    </div>
+                    <div>
+                      <label style={S.label}>Date of Birth *</label>
+                      <input value={editDob} onChange={e=>setEditDob(e.target.value)} placeholder="DD/MM/YYYY" maxLength={10} style={{...S.input,letterSpacing:"0.1em"}}/>
+                    </div>
+                  </div>
+                  <div style={{marginBottom:12}}>
+                    <label style={{...S.label,marginBottom:8}}>Credit Cards</label>
+                    {editCards.map((card,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+                        <input value={card.last4} onChange={e=>updateEditCard(i,"last4",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="Last 4" maxLength={4} style={{...S.input,width:90,letterSpacing:"0.2em",fontSize:14,fontWeight:700,textAlign:"center"}}/>
+                        <input value={card.bankName} onChange={e=>updateEditCard(i,"bankName",e.target.value)} placeholder="Bank name" style={{...S.input,flex:1}}/>
+                        {editCards.length>1&&<button onClick={()=>removeEditCard(i)} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>}
+                      </div>
+                    ))}
+                    <button onClick={addEditCard} style={{background:"none",border:"1px dashed #1e293b",color:"#475569",borderRadius:7,padding:"5px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,marginTop:4}}>+ Add card</button>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>handleUpdate(pid)} disabled={!editName.trim()||!editDob.trim()||editSaving} style={S.btn("#15803d",!editName.trim()||!editDob.trim()||editSaving)}>{editSaving?"⟳ Saving…":"✓ Save Changes"}</button>
+                    <button onClick={cancelEdit} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Cancel</button>
+                  </div>
                 </div>
-                <button onClick={()=>onDelete(person.firestoreId||person.id)} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",borderRadius:7,padding:"5px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>🗑 Remove</button>
-              </div>
-            )}
-          </div>
-        ))
+              )}
+
+              {/* Expanded: password preview */}
+              {isExpanded&&!isEditing&&(
+                <div style={{borderTop:"1px solid #0f172a",padding:"12px 16px"}}>
+                  <div style={{color:"#334155",fontSize:10,fontWeight:600,marginBottom:8,letterSpacing:"0.06em"}}>🔑 AUTO-GENERATED PASSWORDS</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
+                    {generatePasswords(person,person.cards?.[0]?.last4||"").slice(0,24).map((p,i)=>(
+                      <span key={i} style={{background:"#0a0e1a",border:"1px solid #1e293b",color:"#94a3b8",padding:"3px 8px",borderRadius:5,fontFamily:"'DM Mono',monospace",fontSize:10}}>{p.pwd}</span>
+                    ))}
+                  </div>
+                  <div style={{color:"#1e3a5f",fontSize:10}}>All {generatePasswords(person,person.cards?.[0]?.last4||"").length} combinations tried automatically during sync</div>
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
       <div style={{color:"#1e3a5f",fontSize:10,marginTop:12,lineHeight:1.7}}>
         🔐 {uid?"Synced to Firebase — available on all devices":"Local only — sign in to sync"}<br/>
-        💡 Passwords tried in order: exact card match → name+DOB → name+last4 → all combinations
+        💡 Match priority: exact card → name+DOB → name+last4 → all combos
       </div>
     </div>
   );
@@ -542,7 +578,6 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
   const[syncing,setSyncing]=useState(false);
   const[syncLog,setSyncLog]=useState([]);
   const[pwdRequest,setPwdRequest]=useState(null);
-  const pwdRef=useRef(null);
 
   const log=(msg,type="info")=>setSyncLog(prev=>[...prev.slice(-40),{msg,type,t:new Date().toLocaleTimeString()}]);
 
@@ -715,7 +750,13 @@ export default function App(){
           setVault([]); setRecords([]); setPeople([]);
         }
       });
-      return ()=>{ unsub(); if(unsubscribeRef.current.vault) unsubscribeRef.current.vault(); if(unsubscribeRef.current.records) unsubscribeRef.current.records(); };
+      return ()=>{
+        unsub();
+        const refs=unsubscribeRef.current; // eslint-disable-line react-hooks/exhaustive-deps
+        if(refs.vault) refs.vault();
+        if(refs.records) refs.records();
+        if(refs.people) refs.people();
+      };
     }catch(e){ console.error("Firebase init error",e); setAuthReady(true); }
   },[settings?.firebaseConfig]); // eslint-disable-line
 
@@ -769,6 +810,7 @@ export default function App(){
 
   // People operations
   const handleAddPerson    =async(p)=>{ if(user){await addPerson(user.uid,p);}else setPeople(prev=>[...prev,p]); };
+  const handleUpdatePerson =async(fid,data)=>{ if(user){await updatePerson(user.uid,fid,data);}else setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p)); };
   const handleDeletePerson =async(fid)=>{ if(user){await deletePerson(user.uid,fid);}else setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid)); };
 
   // Record operations
@@ -952,7 +994,7 @@ export default function App(){
         )}
 
         {/* People */}
-        {activeTab==="people"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>👥 Cardholder Registry</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Add cardholder details once — app auto-generates all PDF password combinations.</p><PeoplePanel people={people} uid={user?.uid} onAdd={handleAddPerson} onUpdate={()=>{}} onDelete={handleDeletePerson}/></div>}
+        {activeTab==="people"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>👥 Cardholder Registry</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Add cardholder details once — app auto-generates all PDF password combinations.</p><PeoplePanel people={people} uid={user?.uid} onAdd={handleAddPerson} onUpdate={handleUpdatePerson} onDelete={handleDeletePerson}/></div>}
 
         {/* Vault */}
         {activeTab==="vault"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Password Vault</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Passwords matched by bank + card number. Auto-used during sync.</p><VaultPanel vault={vault} uid={user?.uid} onAdd={handleAddVault} onUpdate={handleUpdateVault} onDelete={handleDeleteVault}/></div>}
