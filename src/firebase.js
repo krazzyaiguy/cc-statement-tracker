@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
@@ -11,160 +11,95 @@ import {
   doc,
   getDoc,
   setDoc,
-  updateDoc,
-  collection,
-  getDocs,
-  addDoc,
-  deleteDoc,
-  onSnapshot,
-  serverTimestamp,
 } from "firebase/firestore";
 
-// ── Firebase is initialized with config from localStorage (set during setup) ──
+// ── Strategy: store ALL user data in ONE document per collection ──────────────
+// This means 1 read on login, 1 write per change — instead of per-document
+// listeners that burn through free tier quota instantly.
+//
+// Data structure:
+//   /users/{uid}/data/vault    → { entries: [...] }
+//   /users/{uid}/data/people   → { entries: [...] }
+//   /users/{uid}/data/records  → { entries: [...] }
+//   /users/{uid}/data/meta     → { settings, processedIds }
+
 let app, auth, db;
 
 export function initFirebase(config) {
   try {
-    app  = initializeApp(config, config.projectId);
+    const existing = getApps().find(a => a.name === config.projectId);
+    app  = existing ? getApp(config.projectId) : initializeApp(config, config.projectId);
     auth = getAuth(app);
     db   = getFirestore(app);
     return true;
-  } catch (e) {
-    // App already initialized with same name
-    const { getApp } = require("firebase/app");
-    app  = getApp(config.projectId);
-    auth = getAuth(app);
-    db   = getFirestore(app);
-    return true;
+  } catch(e) {
+    console.error("Firebase init error:", e);
+    return false;
   }
 }
 
 export function getFirebaseAuth() { return auth; }
-export function getFirebaseDb()   { return db; }
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.addScope("https://www.googleapis.com/auth/gmail.readonly");
   const result = await signInWithPopup(auth, provider);
-  // Capture Gmail OAuth token for Gmail API calls
   const credential = GoogleAuthProvider.credentialFromResult(result);
   return { user: result.user, accessToken: credential?.accessToken || null };
 }
 
-export async function signOutUser() {
-  await signOut(auth);
+export async function signOutUser() { await signOut(auth); }
+export function onAuthChange(callback) { return onAuthStateChanged(auth, callback); }
+
+// ── Single doc helpers ────────────────────────────────────────────────────────
+function dataDoc(uid, key) {
+  return doc(db, "users", uid, "data", key);
 }
 
-export function onAuthChange(callback) {
-  return onAuthStateChanged(auth, callback);
+async function loadDoc(uid, key) {
+  try {
+    const snap = await getDoc(dataDoc(uid, key));
+    return snap.exists() ? (snap.data().entries || []) : [];
+  } catch(e) {
+    console.error(`Firestore load ${key} failed:`, e);
+    return [];
+  }
 }
 
-// ── Firestore helpers ─────────────────────────────────────────────────────────
-// All user data lives under: /users/{uid}/...
-
-function vaultCol(uid)        { return collection(db, "users", uid, "vault"); }
-function recordsCol(uid)      { return collection(db, "users", uid, "records"); }
-function settingsDoc(uid)     { return doc(db, "users", uid, "meta", "settings"); }
-function processedDoc(uid)    { return doc(db, "users", uid, "meta", "processed"); }
+async function saveDoc(uid, key, entries) {
+  try {
+    await setDoc(dataDoc(uid, key), { entries, updatedAt: new Date().toISOString() });
+    return true;
+  } catch(e) {
+    console.error(`Firestore save ${key} failed:`, e);
+    return false;
+  }
+}
 
 // ── VAULT ─────────────────────────────────────────────────────────────────────
-export async function loadVault(uid) {
-  const snap = await getDocs(vaultCol(uid));
-  return snap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
-}
+export async function loadVault(uid)          { return loadDoc(uid, "vault"); }
+export async function saveVault(uid, entries) { return saveDoc(uid, "vault", entries); }
 
-export function listenVault(uid, onChange) {
-  return onSnapshot(vaultCol(uid), snap => {
-    onChange(snap.docs.map(d => ({ ...d.data(), firestoreId: d.id })));
-  });
-}
-
-export async function addVaultEntry(uid, entry) {
-  const ref = await addDoc(vaultCol(uid), { ...entry, createdAt: serverTimestamp() });
-  return ref.id;
-}
-
-export async function updateVaultEntry(uid, firestoreId, data) {
-  await updateDoc(doc(vaultCol(uid), firestoreId), data);
-}
-
-export async function deleteVaultEntry(uid, firestoreId) {
-  await deleteDoc(doc(vaultCol(uid), firestoreId));
-}
+// ── PEOPLE ────────────────────────────────────────────────────────────────────
+export async function loadPeople(uid)          { return loadDoc(uid, "people"); }
+export async function savePeople(uid, entries) { return saveDoc(uid, "people", entries); }
 
 // ── RECORDS ───────────────────────────────────────────────────────────────────
-export async function loadRecords(uid) {
-  const snap = await getDocs(recordsCol(uid));
-  return snap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
+export async function loadRecords(uid)          { return loadDoc(uid, "records"); }
+export async function saveRecords(uid, entries) { return saveDoc(uid, "records", entries); }
+
+// ── META (settings + processed IDs) ──────────────────────────────────────────
+export async function loadMeta(uid) {
+  try {
+    const snap = await getDoc(dataDoc(uid, "meta"));
+    return snap.exists() ? snap.data() : {};
+  } catch(e) { return {}; }
 }
 
-export function listenRecords(uid, onChange) {
-  return onSnapshot(recordsCol(uid), snap => {
-    const docs = snap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
-    // Sort by receivedOn descending
-    docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-    onChange(docs);
-  });
-}
-
-export async function addRecord(uid, record) {
-  const { firestoreId, ...clean } = record; // eslint-disable-line no-unused-vars
-  const ref = await addDoc(recordsCol(uid), { ...clean, createdAt: serverTimestamp() });
-  return ref.id;
-}
-
-export async function updateRecord(uid, firestoreId, data) {
-  await updateDoc(doc(recordsCol(uid), firestoreId), data);
-}
-
-export async function deleteRecord(uid, firestoreId) {
-  await deleteDoc(doc(recordsCol(uid), firestoreId));
-}
-
-// ── SETTINGS ──────────────────────────────────────────────────────────────────
-export async function loadSettings(uid) {
-  const snap = await getDoc(settingsDoc(uid));
-  return snap.exists() ? snap.data() : null;
-}
-
-export async function saveSettings(uid, settings) {
-  await setDoc(settingsDoc(uid), settings, { merge: true });
-}
-
-// ── PROCESSED EMAIL IDs ───────────────────────────────────────────────────────
-export async function loadProcessedIds(uid) {
-  const snap = await getDoc(processedDoc(uid));
-  return snap.exists() ? (snap.data().ids || []) : [];
-}
-
-export async function saveProcessedIds(uid, ids) {
-  await setDoc(processedDoc(uid), { ids }, { merge: true });
-}
-
-// ── PEOPLE (cardholder registry) ──────────────────────────────────────────────
-function peopleCol(uid) { return collection(db, "users", uid, "people"); }
-
-export async function loadPeople(uid) {
-  const snap = await getDocs(peopleCol(uid));
-  return snap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
-}
-
-export function listenPeople(uid, onChange) {
-  return onSnapshot(peopleCol(uid), snap => {
-    onChange(snap.docs.map(d => ({ ...d.data(), firestoreId: d.id })));
-  });
-}
-
-export async function addPerson(uid, person) {
-  const ref = await addDoc(peopleCol(uid), { ...person, createdAt: serverTimestamp() });
-  return ref.id;
-}
-
-export async function updatePerson(uid, firestoreId, data) {
-  await updateDoc(doc(peopleCol(uid), firestoreId), data);
-}
-
-export async function deletePerson(uid, firestoreId) {
-  await deleteDoc(doc(peopleCol(uid), firestoreId));
+export async function saveMeta(uid, data) {
+  try {
+    await setDoc(dataDoc(uid, "meta"), { ...data, updatedAt: new Date().toISOString() });
+    return true;
+  } catch(e) { return false; }
 }
