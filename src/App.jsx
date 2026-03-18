@@ -2,10 +2,10 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import {
   initFirebase, signInWithGoogle, signOutUser, onAuthChange,
-  listenVault, addVaultEntry, updateVaultEntry, deleteVaultEntry,
-  listenRecords, addRecord, updateRecord, deleteRecord as deleteRecordFS,
-  loadSettings, saveSettings, loadProcessedIds, saveProcessedIds,
-  listenPeople, addPerson, updatePerson, deletePerson,
+  loadVault, saveVault,
+  loadPeople, savePeople,
+  loadRecords, saveRecords,
+  loadMeta, saveMeta,
 } from "./firebase";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -717,111 +717,83 @@ export default function App(){
   const[activeTab,setActiveTab] = useState("gmail");
   const[syncing,setSyncing]     = useState(false);  // Firebase sync indicator
   const inputRef=useRef(); const processingRef=useRef(false);
-  const unsubscribeRef=useRef({});
 
-  // Initialize Firebase and auth listener
+  // ── Firebase: simple load-on-login, save-on-change (no real-time listeners) ──
   useEffect(()=>{
-    if(!settings?.firebaseConfig)return setAuthReady(true);
-    try{
-      initFirebase(settings.firebaseConfig);
-      const{getFirebaseAuth}=require("./firebase");
-      const auth=getFirebaseAuth();
-      if(!auth)return setAuthReady(true);
-      const unsub=onAuthChange(async(u)=>{
-        setUser(u);setAuthReady(true);
-        if(u){
-          try{const remoteSettings=await loadSettings(u.uid);if(remoteSettings)setSettings(s=>({...s,...remoteSettings}));}catch{}
-          try{const ids=await loadProcessedIds(u.uid);setProcessedIds(ids);}catch{}
+    if(!settings?.firebaseConfig){ setAuthReady(true); return; }
+    try{ initFirebase(settings.firebaseConfig); }catch(e){ console.error(e); setAuthReady(true); return; }
+    const unsub = onAuthChange(async(u)=>{
+      setUser(u); setAuthReady(true);
+      if(u){
+        // Load everything from Firebase once on login
+        // Merge strategy: local data wins if Firebase is empty
+        try{
+          const [fbVault, fbPeople, fbRecords, fbMeta] = await Promise.all([
+            loadVault(u.uid), loadPeople(u.uid), loadRecords(u.uid), loadMeta(u.uid)
+          ]);
+          // Vault: use Firebase if it has data, else upload local
+          const localVault = JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');
+          if(fbVault.length>0){ setVault(fbVault); }
+          else if(localVault.length>0){ setVault(localVault); await saveVault(u.uid,localVault); }
 
-          // SAFE MERGE: upload local data to Firebase first, then start listening
-          // This prevents Firebase overwriting local data with empty arrays
-          const mergeAndListen = async (localKey, firestoreFn, listenerFn, setter) => {
-            try {
-              const localData = JSON.parse(localStorage.getItem(localKey)||'[]');
-              if(localData.length>0){
-                // Upload local items that don't exist in Firebase yet
-                for(const item of localData){
-                  try{ await firestoreFn(u.uid, item); }catch{}
-                }
-                localStorage.removeItem(localKey); // clear after upload
-              }
-            } catch{}
-            // Now start real-time listener
-            return listenerFn(u.uid, setter);
-          };
+          // People: use Firebase if it has data, else upload local
+          const localPeople = JSON.parse(localStorage.getItem('cc_people_v1')||'[]');
+          if(fbPeople.length>0){ setPeople(fbPeople); }
+          else if(localPeople.length>0){ setPeople(localPeople); await savePeople(u.uid,localPeople); }
 
-          if(unsubscribeRef.current.vault) unsubscribeRef.current.vault();
-          if(unsubscribeRef.current.people) unsubscribeRef.current.people();
-          if(unsubscribeRef.current.records) unsubscribeRef.current.records();
+          // Records: always use Firebase (source of truth)
+          if(fbRecords.length>0) setRecords(fbRecords);
 
-          unsubscribeRef.current.vault   = await mergeAndListen('cc_vault_v2',   addVaultEntry,  listenVault,   setVault);
-          unsubscribeRef.current.people  = await mergeAndListen('cc_people_v1',  addPerson,      listenPeople,  setPeople);
-          unsubscribeRef.current.records = listenRecords(u.uid, setRecords);
-        } else {
-          if(unsubscribeRef.current.vault)   unsubscribeRef.current.vault();
-          if(unsubscribeRef.current.records) unsubscribeRef.current.records();
-          if(unsubscribeRef.current.people)  unsubscribeRef.current.people();
-          // Restore from localStorage when signed out
-          try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');setVault(Array.isArray(v)?v:[]);}catch{setVault([]);}
-          try{const p=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');setPeople(Array.isArray(p)?p:[]);}catch{setPeople([]);}
-          setRecords([]);
-        }
-      });
-      return ()=>{
-        unsub();
-        const refs=unsubscribeRef.current; // eslint-disable-line react-hooks/exhaustive-deps
-        if(refs.vault) refs.vault();
-        if(refs.records) refs.records();
-        if(refs.people) refs.people();
-      };
-    }catch(e){ console.error("Firebase init error",e); setAuthReady(true); }
+          // Meta: settings + processedIds
+          if(fbMeta.settings) setSettings(s=>({...s,...fbMeta.settings}));
+          if(fbMeta.processedIds) setProcessedIds(fbMeta.processedIds);
+        }catch(e){ console.error("Firebase load failed:",e); }
+      }
+    });
+    return ()=>unsub();
   },[settings?.firebaseConfig]); // eslint-disable-line
 
-  // Save settings to Firebase when changed
+  // Save settings to localStorage always
+  useEffect(()=>{ if(settings) ls.set(SETTINGS_KEY,settings); },[settings]);
+
+  // Save people to localStorage always + Firebase when signed in
+  const peopleRef=useRef(false);
   useEffect(()=>{
-    if(settings) ls.set(SETTINGS_KEY,settings);
-    if(settings&&user) saveSettings(user.uid,settings).catch(()=>{});
-  },[settings,user]);
+    if(!peopleRef.current){peopleRef.current=true;return;}
+    try{localStorage.setItem('cc_people_v1',JSON.stringify(people));}catch{}
+    if(user) savePeople(user.uid,people).catch(()=>{});
+  },[people]); // eslint-disable-line
+
+  // Save vault to localStorage always + Firebase when signed in
+  const vaultRef=useRef(false);
+  useEffect(()=>{
+    if(!vaultRef.current){vaultRef.current=true;return;}
+    try{localStorage.setItem('cc_vault_v2',JSON.stringify(vault));}catch{}
+    if(user) saveVault(user.uid,vault).catch(()=>{});
+  },[vault]); // eslint-disable-line
+
+  // Save records to Firebase when signed in
+  useEffect(()=>{
+    if(user&&records.length>0) saveRecords(user.uid,records).catch(()=>{});
+  },[user,records]); // eslint-disable-line
 
   // Save processedIds to Firebase
   useEffect(()=>{
-    if(user&&processedIds.length>0) saveProcessedIds(user.uid,processedIds).catch(()=>{});
-  },[user,processedIds]);
-
-  // Persist people & vault to localStorage as fallback (survives refresh even without Firebase)
-  const peopleRef = useRef(false);
-  useEffect(()=>{
-    if(!peopleRef.current){peopleRef.current=true;return;} // skip first render (already loaded)
-    if(!user) try{localStorage.setItem('cc_people_v1',JSON.stringify(people));}catch{}
-  },[people,user]);
-
-  const vaultRef = useRef(false);
-  useEffect(()=>{
-    if(!vaultRef.current){vaultRef.current=true;return;}
-    if(!user) try{localStorage.setItem('cc_vault_v2',JSON.stringify(vault));}catch{}
-  },[vault,user]);
-
+    if(user&&processedIds.length>0) saveMeta(user.uid,{processedIds}).catch(()=>{});
+  },[user,processedIds]); // eslint-disable-line
 
   const handleSaveKey=(s)=>{ setSettings(s); ls.set(SETTINGS_KEY,s); };
 
   // Hooks before early returns
-  const handleNewRecords=useCallback(async(newRecs)=>{
-    if(user){
-      for(const rec of newRecs){
-        const exists=records.find(r=>r.id===rec.id);
-        if(!exists) await addRecord(user.uid,rec);
-      }
-    } else {
-      setRecords(prev=>{const ex=new Set(prev.map(r=>r.id));return[...prev,...newRecs.filter(r=>!ex.has(r.id))];});
-    }
-  },[user,records]);
-
+  const handleNewRecords=useCallback((newRecs)=>{
+    setRecords(prev=>{const ex=new Set(prev.map(r=>r.id));return[...prev,...newRecs.filter(r=>!ex.has(r.id))];});
+  },[]);
   const handleProcessed=useCallback((id)=>setProcessedIds(prev=>prev.includes(id)?prev:[...prev,id]),[]);
 
   if(!authReady) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080c14",color:"#475569",fontFamily:"'DM Mono',monospace",fontSize:13}}>⟳ Loading…</div>;
   if(!settings)  return <SetupScreen onSave={handleSaveKey}/>;
 
-  // Firebase sign in
+  // Firebase sign in/out
   const handleFirebaseSignIn=async()=>{
     try{
       setSyncing(true);
@@ -831,47 +803,21 @@ export default function App(){
     }catch(e){ alert("Sign in failed: "+e.message); }
     setSyncing(false);
   };
-
   const handleFirebaseSignOut=async()=>{ await signOutUser(); setUser(null); ls.del("cc_gmail_token"); ls.del("cc_gmail_email"); };
 
-  // Vault operations
-  const handleAddVault    =async(entry)=>{
-    setVault(p=>[...p,entry]);
-    try{const curr=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');localStorage.setItem('cc_vault_v2',JSON.stringify([...curr,entry]));}catch{}
-    if(user){ try{ await addVaultEntry(user.uid,entry); }catch(e){ console.error("Firebase addVault failed:",e); } }
-  };
-  const handleUpdateVault =async(fid,data)=>{ if(user){await updateVaultEntry(user.uid,fid,data);}else setVault(p=>p.map(e=>(e.firestoreId||e.id)===fid?{...e,...data}:e)); };
-  const handleDeleteVault =async(fid)=>{ if(user){await deleteVaultEntry(user.uid,fid);}else setVault(p=>p.filter(e=>(e.firestoreId||e.id)!==fid)); };
+  // ── Data operations: always update state + localStorage immediately ──────────
+  // Firebase saves happen via the useEffects above (debounced, no quota burn)
 
-  // People operations
-  const handleAddPerson    =async(p)=>{
-    // Always update local state immediately
-    setPeople(prev=>[...prev,p]);
-    // Save to localStorage as backup
-    try{const curr=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');localStorage.setItem('cc_people_v1',JSON.stringify([...curr,p]));}catch{}
-    // Also save to Firebase if signed in
-    if(user){ try{ await addPerson(user.uid,p); }catch(e){ console.error("Firebase addPerson failed:",e); } }
-  };
-  const handleUpdatePerson =async(fid,data)=>{
-    setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p));
-    try{const curr=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');localStorage.setItem('cc_people_v1',JSON.stringify(curr.map(p=>p.id===fid?{...p,...data}:p)));}catch{}
-    if(user){ try{ await updatePerson(user.uid,fid,data); }catch(e){ console.error("Firebase updatePerson failed:",e); } }
-  };
-  const handleDeletePerson =async(fid)=>{
-    setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid));
-    try{const curr=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');localStorage.setItem('cc_people_v1',JSON.stringify(curr.filter(p=>p.id!==fid)));}catch{}
-    if(user){ try{ await deletePerson(user.uid,fid); }catch(e){ console.error("Firebase deletePerson failed:",e); } }
-  };
+  const handleAddVault    =(entry)=>setVault(p=>[...p,entry]);
+  const handleUpdateVault =(fid,data)=>setVault(p=>p.map(e=>(e.firestoreId||e.id)===fid?{...e,...data}:e));
+  const handleDeleteVault =(fid)=>setVault(p=>p.filter(e=>(e.firestoreId||e.id)!==fid));
 
-  // Record operations
-  const handleTogglePaid=async(r)=>{
-    if(user){await updateRecord(user.uid,r.firestoreId,{paid:!r.paid});}
-    else setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,paid:!rec.paid}:rec));
-  };
-  const handleDeleteRecord=async(r)=>{
-    if(user){await deleteRecordFS(user.uid,r.firestoreId);}
-    else setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
-  };
+  const handleAddPerson    =(p)=>setPeople(prev=>[...prev,p]);
+  const handleUpdatePerson =(fid,data)=>setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p));
+  const handleDeletePerson =(fid)=>setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid));
+
+  const handleTogglePaid=(r)=>setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,paid:!rec.paid}:rec));
+  const handleDeleteRecord=(r)=>setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
 
   // Manual upload
   const addFiles=(newFiles)=>{
@@ -903,8 +849,7 @@ export default function App(){
         const result=await callGemini(settings.geminiKey,imgBase64,item.file.type==="application/pdf"?"image/jpeg":item.file.type);
         result.fileName=item.file.name;result.receivedOn=new Date().toLocaleDateString("en-GB");result.source="manual";result.paid=false;result.id=item.id;
         setFiles(prev=>prev.map(f=>f.id===item.id?{...f,status:"done",result}:f));
-        if(user){await addRecord(user.uid,result);}
-        else setRecords(prev=>{const ex=prev.find(r=>r.id===item.id);return ex?prev.map(r=>r.id===item.id?result:r):[...prev,result];});
+        setRecords(prev=>{const ex=prev.find(r=>r.id===item.id);return ex?prev.map(r=>r.id===item.id?result:r):[...prev,result];});
       }catch(err){setFiles(prev=>prev.map(f=>f.id===item.id?{...f,status:"error",error:err.message}:f));}
     }
     processingRef.current=false;setProcessing(false);
@@ -1016,7 +961,7 @@ export default function App(){
             <>
               <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12,gap:10,flexWrap:"wrap"}}>
                 <button className="abtn" onClick={()=>exportToExcel(records)} style={S.btn("#15803d")}>⬇ Export Excel</button>
-                <button className="abtn" onClick={async()=>{if(window.confirm("Clear ALL records?")){if(user){for(const r of records)await deleteRecordFS(user.uid,r.firestoreId).catch(()=>{});}else setRecords([]);}}} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>🗑 Clear All</button>
+                <button className="abtn" onClick={()=>{if(window.confirm("Clear ALL records?")) setRecords([]);}} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>🗑 Clear All</button>
               </div>
               <div className="tbl-sc" style={{border:"1px solid #1e293b",borderRadius:10}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:640}}>
