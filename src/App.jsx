@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GEMINI_MODEL  = "gemini-2.5-flash-lite";
+const GEMINI_MODEL  = "gemini-1.5-flash-latest";
 const RECORDS_KEY   = "cc_records_v3";
 const VAULT_KEY     = "cc_vault_v2";          // upgraded schema
 const SETTINGS_KEY  = "cc_settings_v1";
@@ -577,7 +577,7 @@ function SettingsPanel({ settings, onUpdate, onReset }) {
 export default function App() {
   const [settings,setSettings]         = useState(()=>ls.get(SETTINGS_KEY));
   const [records,setRecords]           = useState(()=>ls.get(RECORDS_KEY,[]));
-  const [vault,setVault]               = useState(()=>{ const v=ls.get(VAULT_KEY,[]); return Array.isArray(v)?v:[]; }); // ensure array
+  const [vault,setVault]               = useState(()=>{ try { const v=JSON.parse(localStorage.getItem(VAULT_KEY)||'[]'); return Array.isArray(v)?v:[]; } catch { return []; } });
   const [processedIds,setProcessedIds] = useState(()=>ls.get(PROCESSED_KEY,[]));
   const [files,setFiles]               = useState([]);
   const [dragging,setDragging]         = useState(false);
@@ -586,8 +586,12 @@ export default function App() {
   const [activeTab,setActiveTab]       = useState("gmail");
   const inputRef=useRef(); const processingRef=useRef(false);
 
+  const isFirstRender=useRef(true);
   useEffect(()=>{ls.set(RECORDS_KEY,records);},[records]);
-  useEffect(()=>{ls.set(VAULT_KEY,vault);},[vault]);
+  useEffect(()=>{
+    if(isFirstRender.current){isFirstRender.current=false;return;}
+    try{localStorage.setItem(VAULT_KEY,JSON.stringify(vault));}catch{}
+  },[vault]);
   useEffect(()=>{ls.set(PROCESSED_KEY,processedIds);},[processedIds]);
   useEffect(()=>{if(settings)ls.set(SETTINGS_KEY,settings);},[settings]);
 
