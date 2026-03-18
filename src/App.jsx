@@ -9,7 +9,7 @@ import {
 } from "./firebase";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GEMINI_MODEL   = "gemini-2.5-flash";
+const GEMINI_MODEL   = "gemini-1.5-flash-latest";
 const SETTINGS_KEY   = "cc_settings_v2";   // localStorage fallback for settings only
 const GMAIL_SCOPES   = "https://www.googleapis.com/auth/gmail.readonly";
 
@@ -707,8 +707,8 @@ export default function App(){
   const[user,setUser]           = useState(null);      // Firebase auth user
   const[authReady,setAuthReady] = useState(false);
   const[records,setRecords]     = useState([]);
-  const[vault,setVault]         = useState([]);
-  const[people,setPeople]       = useState([]);
+  const[vault,setVault]         = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
+  const[people,setPeople]       = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[processedIds,setProcessedIds] = useState([]);
   const[files,setFiles]         = useState([]);
   const[dragging,setDragging]   = useState(false);
@@ -741,7 +741,15 @@ export default function App(){
           if(unsubscribeRef.current.records) unsubscribeRef.current.records();
           unsubscribeRef.current.vault=listenVault(u.uid,setVault);
           if(unsubscribeRef.current.people) unsubscribeRef.current.people();
-          unsubscribeRef.current.people=listenPeople(u.uid,setPeople);
+          unsubscribeRef.current.people=listenPeople(u.uid,async(remotePeople)=>{
+            // Merge: upload any locally-saved people that aren't in Firebase yet
+            const localPeople=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');
+            const remoteIds=new Set(remotePeople.map(p=>p.id));
+            const toUpload=localPeople.filter(p=>!remoteIds.has(p.id));
+            for(const p of toUpload){ try{ await addPerson(u.uid,p); }catch{} }
+            if(toUpload.length>0) localStorage.removeItem('cc_people_v1'); // clean up after upload
+            setPeople(remotePeople);
+          });
           unsubscribeRef.current.records=listenRecords(u.uid,setRecords);
         } else {
           // Clear listeners
@@ -770,6 +778,20 @@ export default function App(){
   useEffect(()=>{
     if(user&&processedIds.length>0) saveProcessedIds(user.uid,processedIds).catch(()=>{});
   },[user,processedIds]);
+
+  // Persist people & vault to localStorage as fallback (survives refresh even without Firebase)
+  const peopleRef = useRef(false);
+  useEffect(()=>{
+    if(!peopleRef.current){peopleRef.current=true;return;} // skip first render (already loaded)
+    if(!user) try{localStorage.setItem('cc_people_v1',JSON.stringify(people));}catch{}
+  },[people,user]);
+
+  const vaultRef = useRef(false);
+  useEffect(()=>{
+    if(!vaultRef.current){vaultRef.current=true;return;}
+    if(!user) try{localStorage.setItem('cc_vault_v2',JSON.stringify(vault));}catch{}
+  },[vault,user]);
+
 
   const handleSaveKey=(s)=>{ setSettings(s); ls.set(SETTINGS_KEY,s); };
 
