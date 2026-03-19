@@ -84,6 +84,16 @@ export default function App(){
           console.log("[Firebase] All data loaded successfully ✓");
         }catch(e){
           console.error("[Firebase] Load FAILED:", e.code, e.message);
+          // Firebase failed — load everything from localStorage as fallback
+          try{
+            const lv=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');
+            const lp=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');
+            const lr=JSON.parse(localStorage.getItem('cc_records_v1')||'[]');
+            if(lv.length>0) setVault(lv);
+            if(lp.length>0) setPeople(lp);
+            if(lr.length>0) setRecords(lr);
+            console.log("[Firebase] Loaded from localStorage fallback — vault:", lv.length, "people:", lp.length, "records:", lr.length);
+          }catch{}
         }
       }
     });
