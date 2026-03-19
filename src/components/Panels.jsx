@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { initFirebase } from "../firebase";
 import { DEFAULT_BANK_RULES, generatePasswords } from "../utils/passwords";
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
