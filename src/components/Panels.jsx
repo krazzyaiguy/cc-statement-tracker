@@ -39,8 +39,7 @@ export function PasswordModal({file,hint,onSubmit,onSkip}){
   );
 }
 
-// ─── SETUP SCREEN ─────────────────────────────────────────────────────────────
-function SetupScreen({onSave}){
+// ─── SETUP SCREEN ─────────────────────────────────────────────────────────────){
   const[geminiKey,setGeminiKey]=useState("");
   const[fbConfig,setFbConfig]=useState({apiKey:"",authDomain:"",projectId:"",storageBucket:"",messagingSenderId:"",appId:""});
   const[googleClientId,setGoogleClientId]=useState("");
