@@ -111,6 +111,9 @@ export function generateByFormula(formula, person, last4Hint) {
     case "ddmm":            add(dd+mm); add(mm+dd); break;
     case "ddmmyy":          add(dd+mm+yy); break;
     case "ddmmyyyy":        add(dd+mm+yyyy); break;
+    case "ddmmyyyy+last4":  cardLast4s.forEach(l4=>{ add(dd+mm+yyyy+l4); }); break;
+    case "ddmmyy+last4":    cardLast4s.forEach(l4=>{ add(dd+mm+yy+l4); }); break;
+    case "ddmm+last4":      cardLast4s.forEach(l4=>{ add(dd+mm+l4); }); break;
     default: break;
   }
   return results;
@@ -120,7 +123,7 @@ export function generateByFormula(formula, person, last4Hint) {
 export const DEFAULT_BANK_RULES = [
   { id:"hdfc",    bankName:"HDFC",               formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
   { id:"icici",   bankName:"ICICI",              formula:"name4l+ddmm",    notes:"e.g. suji0501" },
-  { id:"sbi",     bankName:"SBI",                formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
+  { id:"sbi",     bankName:"SBI",                formula:"ddmmyyyy+last4",  notes:"e.g. 010419801234" },
   { id:"rbl",     bankName:"RBL",                formula:"name4+ddmmyy",   notes:"e.g. ANSH140987" },
   { id:"idfc",    bankName:"IDFC FIRST",         formula:"ddmm",           notes:"e.g. 1409 (just DOB DDMM)" },
   { id:"axis",    bankName:"Axis",               formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
