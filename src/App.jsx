@@ -69,7 +69,15 @@ export default function App(){
             console.log("[Firebase] Uploaded local people to Firebase:", saved);
           }
 
-          if(fbRecords.length>0){ setRecords(fbRecords); console.log("[Firebase] Using Firebase records"); }
+          const localRecords = JSON.parse(localStorage.getItem('cc_records_v1')||'[]');
+          if(fbRecords.length>0){
+            setRecords(fbRecords);
+            console.log("[Firebase] Using Firebase records:", fbRecords.length);
+          } else if(localRecords.length>0){
+            setRecords(localRecords);
+            console.log("[Firebase] Using local records:", localRecords.length);
+            saveRecords(u.uid, localRecords).catch(()=>{});
+          }
 
           if(fbMeta.settings) setSettings(s=>({...s,...fbMeta.settings}));
           if(fbMeta.processedIds) setProcessedIds(fbMeta.processedIds);
@@ -122,6 +130,9 @@ export default function App(){
     const json=JSON.stringify(records);
     if(prevRecordsRef.current===json) return;
     prevRecordsRef.current=json;
+    // Save to localStorage immediately (works offline)
+    if(records.length>0) try{localStorage.setItem('cc_records_v1',json);}catch{}
+    // Save to Firebase (may fail if offline — localStorage is the backup)
     if(user&&records.length>0){
       saveRecords(user.uid,records)
         .then(ok=>console.log('[Firebase] saveRecords:',ok,records.length,'entries'))
