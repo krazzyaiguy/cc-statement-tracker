@@ -163,12 +163,7 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
     // filename pattern: xxxx-xxxx-xx-xxxx1234
     /[xX-]{4,}(\d{4})(?!\d)/g,
   ];
-  // Also check patterns for 2-digit last digits (XXXX08 format)
-  const patterns2extra = [
-    /(?:x{3,}|\*{3,})(\d{2})(?!\d)/gi,
-    /card\s*number\s+[xX*-]+(\d{2})(?!\d)/gi,
-    /[xX*-]{3,}(\d{2})(?:[^\d]|$)/g,
-  ];
+
   for (const p of patterns4) {
     p.lastIndex = 0;
     const m = p.exec(fullText);
