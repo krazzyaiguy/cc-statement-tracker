@@ -85,16 +85,28 @@ function findPersonForCard(people, last4Hint, emailText) {
 function resolvePasswords(vault, people, bankHint, last4Hint, emailText) {
   const results = [];
   const seen = new Set();
-  const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)){seen.add(pwd);results.push({pwd,label});} };
-  // 1. Auto-generated from people registry
+  const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)&&results.length<60){seen.add(pwd);results.push({pwd,label});} };
+
+  // 1. Try matched person first (exact card match = best candidate)
   const person = findPersonForCard(people||[], last4Hint, emailText);
-  if (person) { generatePasswords(person,last4Hint).forEach(p=>addPwd(p.pwd,p.label)); }
-  if (last4Hint&&results.length===0) { (people||[]).forEach(p=>generatePasswords(p,last4Hint).forEach(pw=>addPwd(pw.pwd,pw.label))); }
-  // 2. Manual vault passwords (fallback)
+  if (person) {
+    generatePasswords(person, last4Hint).forEach(p=>addPwd(p.pwd,p.label));
+  }
+
+  // 2. Only try other people if no match found AND we have a last4 hint
+  // This prevents trying all 7 people when card owner is unknown
+  if (results.length===0 && last4Hint) {
+    // Try only people whose cards include this last4
+    const matched = (people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
+    matched.forEach(p=>generatePasswords(p,last4Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
+  }
+
+  // 3. Manual vault passwords
   const bank=(bankHint||"").toLowerCase(); const last4=(last4Hint||"").trim();
   if(bank&&last4)(vault||[]).filter(e=>e.bankName&&e.bankName.toLowerCase().includes(bank)&&e.last4===last4).forEach(e=>addPwd(e.password,`Vault: ${e.bankName} ••••${e.last4}`));
   if(bank)(vault||[]).filter(e=>e.bankName&&e.bankName.toLowerCase().includes(bank)&&!e.last4).forEach(e=>addPwd(e.password,`Vault: ${e.bankName}`));
   (vault||[]).forEach(e=>addPwd(e.password,`Vault: ${e.bankName||""}${e.last4?" ••••"+e.last4:""}`));
+
   return results;
 }
 
