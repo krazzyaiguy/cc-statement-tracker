@@ -9,7 +9,7 @@ import {
 } from "./firebase";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GEMINI_MODEL   = "gemini-1.5-flash-latest";
+const GEMINI_MODEL   = "gemini-2.5-flash-preview-04-17";
 const SETTINGS_KEY   = "cc_settings_v2";   // localStorage fallback for settings only
 const GMAIL_SCOPES   = "https://www.googleapis.com/auth/gmail.readonly";
 
@@ -612,6 +612,17 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
   const runSync=async()=>{
     if(!gmailToken)return;
     setSyncing(true);setSyncLog([]);
+    // Quick token check before starting
+    try{
+      const test=await fetch("https://www.googleapis.com/oauth2/v1/tokeninfo?access_token="+gmailToken);
+      if(test.status===400||test.status===401){
+        log("❌ Gmail token expired — please Disconnect and Sign in again","error");
+        signOut(); setSyncing(false); return;
+      }
+      const info=await test.json();
+      const minsLeft=Math.floor((info.expires_in||0)/60);
+      log(`✓ Gmail token valid · ${minsLeft} min remaining`);
+    }catch{}
 
     // Calculate date filter
     // If we have a lastSyncDate, use that. Otherwise look back syncDays days.
@@ -703,8 +714,11 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
           }
           onProcessed(id);
         }catch(err){
+          if(err.message.includes("401")){
+            log("❌ Gmail token expired — please Disconnect and Sign in again","error");
+            signOut(); setSyncing(false); return; // stop immediately, no point continuing
+          }
           log(`❌ Error processing email: ${err.message}`,"error");
-          log(`   Stack: ${(err.stack||'').split('\n')[1]||""}`,"error");
           onProcessed(id);
         }
       }
@@ -741,9 +755,12 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
         </div>
       ):(
         <div>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
             <div style={{background:"#052e16",border:"1px solid #14532d",borderRadius:8,padding:"8px 14px",fontSize:12,color:"#4ade80"}}>✓ {gmailEmail||"Gmail connected"}</div>
             <button onClick={signOut} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",borderRadius:7,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>Disconnect</button>
+          </div>
+          <div style={{background:"#2d1b0e",border:"1px solid #92400e",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:11,color:"#fb923c",lineHeight:1.7}}>
+            ⚠ <strong>Gmail tokens expire after 1 hour.</strong> If you see 401 errors, click Disconnect → Sign in again → Sync immediately.
           </div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
             <button onClick={runSync} disabled={syncing} style={{...S.btn(syncing?"#1e293b":"#1d4ed8",syncing),display:"flex",alignItems:"center",gap:8}}>
