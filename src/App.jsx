@@ -9,7 +9,7 @@ import {
 } from "./firebase";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GEMINI_MODEL   = "gemini-2.0-flash";
+const AI_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // Groq — free, no card needed
 const SETTINGS_KEY   = "cc_settings_v2";   // localStorage fallback for settings only
 const GMAIL_SCOPES   = "https://www.googleapis.com/auth/gmail.readonly";
 
@@ -150,13 +150,29 @@ async function tryPasswordsOnPDF(bytes, passwordList) {
 
 async function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
-// ─── GEMINI ───────────────────────────────────────────────────────────────────
-async function callGemini(apiKey,base64,mimeType="image/jpeg"){
-  const url=`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:EXTRACTION_PROMPT},{inlineData:{mimeType,data:base64}}]}],generationConfig:{temperature:0.1,maxOutputTokens:1000}})});
+// ─── GROQ ───────────────────────────────────────────────────────────────────
+async function callGroq(apiKey,base64,mimeType="image/jpeg"){
+  // Groq is OpenAI-compatible — just different base URL and model
+  const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+    body:JSON.stringify({
+      model:AI_MODEL,
+      max_tokens:1000,
+      temperature:0.1,
+      response_format:{type:"json_object"},
+      messages:[{
+        role:"user",
+        content:[
+          {type:"text",text:EXTRACTION_PROMPT},
+          {type:"image_url",image_url:{url:`data:${mimeType};base64,${base64}`}}
+        ]
+      }]
+    })
+  });
   const data=await res.json();
-  if(data.error)throw new Error(data.error.message);
-  const text=data.candidates?.[0]?.content?.parts?.[0]?.text||"";
+  if(data.error)throw new Error(data.error.message||data.error);
+  const text=data.choices?.[0]?.message?.content||"";
   return JSON.parse(text.replace(/```json|```/g,"").trim());
 }
 
@@ -236,14 +252,16 @@ function SetupScreen({onSave}){
   const[testing,setTesting]=useState(false);
   const[error,setError]=useState("");
 
-  const testGemini=async()=>{
-    if(!geminiKey.trim()){setError("Enter Gemini API key");return;}
+  const testGroq=async()=>{
+    if(!geminiKey.trim()){setError("Enter Groq API key");return;}
     setTesting(true);setError("");
     try{
-      const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey.trim()}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:"Reply: ok"}]}]})});
-      const d=await res.json();if(d.error)throw new Error(d.error.message);
+      const res=await fetch("https://api.groq.com/openai/v1/models",{headers:{"Authorization":`Bearer ${geminiKey.trim()}`}});
+      const d=await res.json();
+      if(d.error)throw new Error(d.error.message||JSON.stringify(d.error));
+      if(!d.data||d.data.length===0)throw new Error("Invalid API key");
       setStep(2);
-    }catch(e){setError("Gemini key error: "+e.message);}
+    }catch(e){setError("Groq key error: "+e.message);}
     setTesting(false);
   };
 
@@ -263,19 +281,19 @@ function SetupScreen({onSave}){
 
         {/* Step indicators */}
         <div style={{display:"flex",gap:8,marginBottom:24}}>
-          {["1 Gemini Key","2 Firebase","3 Gmail"].map((s,i)=>(
+          {["1 Groq Key","2 Firebase","3 Gmail"].map((s,i)=>(
             <div key={s} style={{flex:1,textAlign:"center",padding:"6px 4px",borderRadius:7,background:step===i+1?"#1e40af":step>i+1?"#052e16":"#0d1424",border:`1px solid ${step===i+1?"#3b82f6":step>i+1?"#14532d":"#1e293b"}`,fontSize:10,color:step===i+1?"#93c5fd":step>i+1?"#4ade80":"#334155",fontWeight:600}}>{step>i+1?"✓ ":""}{s}</div>
           ))}
         </div>
 
         {step===1&&(
           <div>
-            <p style={{color:"#475569",fontSize:12,lineHeight:1.8,marginBottom:20}}>Gemini AI reads your PDF statements. Free tier: 1,500 req/day.</p>
-            <label style={S.label}>Gemini API Key</label>
-            <input type="password" value={geminiKey} onChange={e=>{setGeminiKey(e.target.value);setError("");}} placeholder="AIza..." style={{...S.input,marginBottom:6}}/>
-            <div style={{color:"#334155",fontSize:10,marginBottom:16}}>Get free key → <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>aistudio.google.com/apikey</a></div>
+            <p style={{color:"#475569",fontSize:12,lineHeight:1.8,marginBottom:20}}>Groq Llama 4 Scout reads your PDF statements. Completely free.</p>
+            <label style={S.label}>Groq API Key</label>
+            <input type="password" value={geminiKey} onChange={e=>{setGeminiKey(e.target.value);setError("");}} placeholder="gsk_..." style={{...S.input,marginBottom:6}}/>
+            <div style={{color:"#334155",fontSize:10,marginBottom:16}}>Get key → <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>console.groq.com/keys</a> · Free, no credit card</div>
             {error&&<div style={{background:"#3b1111",color:"#f87171",borderRadius:6,padding:"8px 12px",fontSize:11,marginBottom:12}}>✕ {error}</div>}
-            <button onClick={testGemini} disabled={!geminiKey.trim()||testing} style={{...S.btn("#15803d",!geminiKey.trim()||testing),width:"100%",padding:"12px"}}>{testing?"⟳ Verifying…":"Verify & Next →"}</button>
+            <button onClick={testGroq} disabled={!geminiKey.trim()||testing} style={{...S.btn("#15803d",!geminiKey.trim()||testing),width:"100%",padding:"12px"}}>{testing?"⟳ Verifying…":"Verify & Next →"}</button>
           </div>
         )}
 
@@ -701,15 +719,15 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
                 log(`   ↳ ❌ PDF error: ${e.message}`,"error");continue;
               }
             }
-            log(`   ↳ 🤖 Sending to Gemini for extraction...`);
+            log(`   ↳ 🤖 Sending to Groq for extraction...`);
             try{
-              const result=await callGemini(settings.geminiKey,imgBase64);
+              const result=await callGroq(settings.geminiKey,imgBase64);
               result.fileName=fname;result.receivedOn=new Date(date).toLocaleDateString("en-GB");
               result.source="gmail";result.paid=false;result.id=`gmail-${id}-${fname}`;
               newRecords.push(result);
               log(`   ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due: ${result.dueAmount||"?"} ${result.currency||""}`,"success");
-            }catch(geminiErr){
-              log(`   ↳ ❌ Gemini error: ${geminiErr.message}`,"error");
+            }catch(aiErr){
+              log(`   ↳ ❌ Groq error: ${aiErr.message}`,"error");
             }
           }
           onProcessed(id);
@@ -807,7 +825,7 @@ function SettingsPanel({settings,onUpdate,onReset}){
   const save=()=>{onUpdate({...settings,geminiKey:geminiKey.trim(),googleClientId:googleClientId.trim()});setSaved(true);setTimeout(()=>setSaved(false),2000);};
   return(
     <div>
-      <div style={{marginBottom:20}}><label style={S.label}>Gemini API Key</label><input type="password" value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} style={{...S.input,marginBottom:6}}/><div style={{color:"#334155",fontSize:10}}><a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>aistudio.google.com/apikey</a></div></div>
+      <div style={{marginBottom:20}}><label style={S.label}>Groq API Key</label><input type="password" value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} style={{...S.input,marginBottom:6}}/><div style={{color:"#334155",fontSize:10}}><a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>console.groq.com/keys</a></div></div>
       <div style={{marginBottom:24}}><label style={S.label}>Google OAuth Client ID</label><input type="text" value={googleClientId} onChange={e=>setGoogleClientId(e.target.value)} placeholder="xxxxxxx.apps.googleusercontent.com" style={{...S.input,marginBottom:6}}/></div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         <button onClick={save} style={S.btn("#15803d")}>{saved?"✓ Saved!":"Save Settings"}</button>
@@ -993,7 +1011,7 @@ export default function App(){
             }else throw e;
           }
         }else{imgBase64=await fileToBase64(item.file);}
-        const result=await callGemini(settings.geminiKey,imgBase64,item.file.type==="application/pdf"?"image/jpeg":item.file.type);
+        const result=await callGroq(settings.geminiKey,imgBase64,item.file.type==="application/pdf"?"image/jpeg":item.file.type);
         result.fileName=item.file.name;result.receivedOn=new Date().toLocaleDateString("en-GB");result.source="manual";result.paid=false;result.id=item.id;
         setFiles(prev=>prev.map(f=>f.id===item.id?{...f,status:"done",result}:f));
         setRecords(prev=>{const ex=prev.find(r=>r.id===item.id);return ex?prev.map(r=>r.id===item.id?result:r):[...prev,result];});
@@ -1029,7 +1047,7 @@ export default function App(){
             <div style={{width:30,height:30,borderRadius:7,background:"linear-gradient(135deg,#3b82f6,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>💳</div>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15}}>CC Statement Tracker</div>
-              <div style={{color:user?"#14532d":"#1e3a5f",fontSize:9,letterSpacing:"0.06em"}}>{user?`☁ ${user.email}`:"⚡ GEMINI FREE · GMAIL SYNC"}</div>
+              <div style={{color:user?"#14532d":"#1e3a5f",fontSize:9,letterSpacing:"0.06em"}}>{user?`☁ ${user.email}`:"⚡ GROQ FREE · GMAIL SYNC"}</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
