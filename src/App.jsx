@@ -41,8 +41,10 @@ function generatePasswords(person, last4Hint) {
   if (!person) return passwords;
   const name = (person.fullName||"").toUpperCase().replace(/[^A-Z]/g,"");
   const dob  = person.dob||"";
-  const parts = dob.split("/");
-  const dd = parts[0]||"", mm = parts[1]||"", yyyy = parts[2]||"";
+  // Support both DD/MM/YYYY and DD-MM-YYYY formats
+  const parts = dob.includes("/")?dob.split("/"):dob.includes("-")?dob.split("-"):dob.split("/");
+  const dd = (parts[0]||"").padStart(2,"0"), mm = (parts[1]||"").padStart(2,"0"), yyyy = parts[2]||"";
+  console.log("[GenPwd]", person.fullName, "dob:", dob, "→ dd:", dd, "mm:", mm, "yyyy:", yyyy, "name:", name);
   const namePrefixes = [name.slice(0,4),name.slice(0,3),name.slice(0,5)].filter(Boolean);
   const dateSuffixes = [];
   if (dd&&mm)        { dateSuffixes.push(dd+mm); dateSuffixes.push(mm+dd); }
@@ -76,32 +78,46 @@ function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHin
   const seen = new Set();
   const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)&&results.length<80){seen.add(pwd);results.push({pwd,label});} };
 
+  console.log("[PwdResolve] hints:", {last4Hint,last2Hint,nameHint,bankHint,peopleCount:people?.length});
+
   // 1. Find best matching person using all available hints
   const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailText);
+  console.log("[PwdResolve] matched person:", person?.fullName||"none");
+
   if (person) {
-    // Use last4 if known, otherwise use matched card's last4
     const cardLast4 = last4Hint || person.cards?.find(c=>last2Hint&&c.last4?.endsWith(last2Hint))?.last4 || "";
-    generatePasswords(person, cardLast4).forEach(p=>addPwd(p.pwd,p.label));
+    const pwds = generatePasswords(person, cardLast4);
+    console.log("[PwdResolve] generated passwords for matched person:", pwds.length, "first:", pwds[0]?.pwd);
+    pwds.forEach(p=>addPwd(p.pwd,p.label));
   }
 
   // 2. If no person matched but we have last4, try people whose cards match
   if (results.length===0 && last4Hint) {
-    (people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint))
-      .forEach(p=>generatePasswords(p,last4Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
+    const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
+    console.log("[PwdResolve] last4 fallback matches:", matched.map(p=>p.fullName));
+    matched.forEach(p=>generatePasswords(p,last4Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
   // 3. If no person matched but we have last2, try people whose cards end with last2
   if (results.length===0 && last2Hint) {
-    (people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)))
-      .forEach(p=>generatePasswords(p,last2Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
+    const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
+    console.log("[PwdResolve] last2 fallback matches:", matched.map(p=>p.fullName));
+    matched.forEach(p=>generatePasswords(p,last2Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
-  // 4. Manual vault passwords (always try these)
+  // 4. If STILL nothing — try ALL people (last resort, capped at 80)
+  if (results.length===0 && people?.length>0) {
+    console.log("[PwdResolve] No hints matched — trying all people as last resort");
+    (people||[]).forEach(p=>generatePasswords(p,last4Hint||last2Hint||"").forEach(pw=>addPwd(pw.pwd,pw.label)));
+  }
+
+  // 5. Manual vault passwords
   const bank=(bankHint||"").toLowerCase(); const last4=(last4Hint||"").trim();
   if(bank&&last4)(vault||[]).filter(e=>e.bankName&&e.bankName.toLowerCase().includes(bank)&&e.last4===last4).forEach(e=>addPwd(e.password,`Vault: ${e.bankName} ••••${e.last4}`));
   if(bank)(vault||[]).filter(e=>e.bankName&&e.bankName.toLowerCase().includes(bank)&&!e.last4).forEach(e=>addPwd(e.password,`Vault: ${e.bankName}`));
   (vault||[]).forEach(e=>addPwd(e.password,`Vault: ${e.bankName||""}${e.last4?" ••••"+e.last4:""}`));
 
+  console.log("[PwdResolve] total passwords:", results.length);
   return results;
 }
 
