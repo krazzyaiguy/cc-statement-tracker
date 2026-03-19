@@ -305,16 +305,24 @@ export function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
 
 // ── BANK RULES PANEL ─────────────────────────────────────────────────────────
 export const FORMULA_OPTIONS = [
-  { value:"name4+ddmm",     label:"Name(4) + DDMM",      example:"RAVI0512" },
-  { value:"name4+mmdd",     label:"Name(4) + MMDD",      example:"RAVI1205" },
-  { value:"name4+ddmmyy",   label:"Name(4) + DDMMYY",    example:"ANSH140987" },
-  { value:"name4+ddmmyyyy", label:"Name(4) + DDMMYYYY",  example:"RAVI05121975" },
-  { value:"name4+mmddyy",   label:"Name(4) + MMDDYY",    example:"RAVI120587" },
-  { value:"name4+yyyy",     label:"Name(4) + YYYY",      example:"RAVI1975" },
-  { value:"name4+last4",    label:"Name(4) + Last4Digits",example:"SHUB2308" },
-  { value:"ddmm",           label:"DDMM only (no name)",  example:"0512" },
-  { value:"ddmmyy",         label:"DDMMYY only",          example:"051275" },
-  { value:"ddmmyyyy",       label:"DDMMYYYY only",        example:"05121975" },
+  // ── UPPERCASE (most banks) ───────────────────────────────────────────────
+  { value:"name4+ddmm",         label:"UPPERCASE: Name(4) + DDMM",      example:"RAVI0512" },
+  { value:"name4+mmdd",         label:"UPPERCASE: Name(4) + MMDD",      example:"RAVI1205" },
+  { value:"name4+ddmmyy",       label:"UPPERCASE: Name(4) + DDMMYY",    example:"ANSH140987" },
+  { value:"name4+ddmmyyyy",     label:"UPPERCASE: Name(4) + DDMMYYYY",  example:"RAVI05121975" },
+  { value:"name4+yyyy",         label:"UPPERCASE: Name(4) + YYYY",      example:"RAVI1975" },
+  { value:"name4+last4",        label:"UPPERCASE: Name(4) + Last4",     example:"SHUB2308" },
+  // ── LOWERCASE (ICICI and some others) ────────────────────────────────────
+  { value:"name4l+ddmm",        label:"lowercase: name(4) + DDMM",      example:"ravi0512" },
+  { value:"name4l+mmdd",        label:"lowercase: name(4) + MMDD",      example:"ravi1205" },
+  { value:"name4l+ddmmyy",      label:"lowercase: name(4) + DDMMYY",    example:"ansh140987" },
+  { value:"name4l+ddmmyyyy",    label:"lowercase: name(4) + DDMMYYYY",  example:"ravi05121975" },
+  { value:"name4l+yyyy",        label:"lowercase: name(4) + YYYY",      example:"ravi1975" },
+  { value:"name4l+last4",       label:"lowercase: name(4) + Last4",     example:"shub2308" },
+  // ── DATE ONLY ─────────────────────────────────────────────────────────────
+  { value:"ddmm",               label:"DDMM only (no name)",             example:"0512" },
+  { value:"ddmmyy",             label:"DDMMYY only",                     example:"051275" },
+  { value:"ddmmyyyy",           label:"DDMMYYYY only",                   example:"05121975" },
 ];
 
 export function BankRulesPanel({ rules, onUpdate }) {
