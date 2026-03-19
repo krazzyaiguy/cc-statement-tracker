@@ -583,7 +583,7 @@ function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
 }
 
 // ─── GMAIL SYNC PANEL ─────────────────────────────────────────────────────────
-function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onProcessed}){
+function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onProcessed,onResetProcessed}){
   const[gmailToken,setGmailToken]=useState(ls.get("cc_gmail_token"));
   const[gmailEmail,setGmailEmail]=useState(ls.get("cc_gmail_email",""));
   const[syncing,setSyncing]=useState(false);
@@ -749,7 +749,7 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
             <button onClick={runSync} disabled={syncing} style={{...S.btn(syncing?"#1e293b":"#1d4ed8",syncing),display:"flex",alignItems:"center",gap:8}}>
               {syncing?"⟳ Syncing Gmail…":"⚡ Sync Gmail Now"}
             </button>
-            <button onClick={()=>{setProcessedIds([]);log("🔄 Reset — will re-scan emails in current date range","success");}} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
+            <button onClick={()=>{onResetProcessed();log("🔄 Reset — will re-scan emails in current date range","success");}} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
               🔄 Re-scan
             </button>
           </div>
@@ -1052,7 +1052,7 @@ export default function App(){
         </div>
 
         {/* Gmail Sync */}
-        {activeTab==="gmail"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Gmail Auto-Sync</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Auto-finds CC emails, matches vault passwords, extracts data.</p><GmailSyncPanel settings={settings} vault={vault} people={people} uid={user?.uid} onNewRecords={handleNewRecords} processedIds={processedIds} onProcessed={handleProcessed}/></div>}
+        {activeTab==="gmail"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Gmail Auto-Sync</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Auto-finds CC emails, matches vault passwords, extracts data.</p><GmailSyncPanel settings={settings} vault={vault} people={people} uid={user?.uid} onNewRecords={handleNewRecords} processedIds={processedIds} onProcessed={handleProcessed} onResetProcessed={()=>setProcessedIds([])}/></div>}
 
         {/* Manual Upload */}
         {activeTab==="upload"&&(
