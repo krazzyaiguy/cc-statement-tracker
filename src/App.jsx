@@ -58,9 +58,19 @@ function generatePasswords(person, last4Hint, formatHint=null) {
 
   // If bank told us the exact format, only try that format first
   if (formatHint==="ddmm") {
-    // Only DDMM — e.g. IDFC says "password is DOB in DDMM format"
     namePrefixes.forEach(np=>add(np+(dd+mm),`${person.fullName}: name+DDMM`));
     if (dd&&mm) { add(dd+mm,`${person.fullName}: DDMM only`); add(mm+dd,`${person.fullName}: MMDD only`); }
+  } else if (formatHint==="ddmmyy"||formatHint==="name4+ddmmyy") {
+    // RBL Bank: First 4 letters + DDMMYY (last 2 of year)
+    const yy = yyyy.slice(-2); // e.g. "87" from "1987"
+    namePrefixes.forEach(np=>{
+      add(np+(dd+mm+yy),`${person.fullName}: name+DDMMYY`);  // SNEH140987
+      add(np+(dd+mm+yyyy),`${person.fullName}: name+DDMMYYYY`); // SNEH14091987
+      add(np+(mm+dd+yy),`${person.fullName}: name+MMDDYY`);
+    });
+    if (formatHint==="ddmmyy") {
+      add(dd+mm+yy,`${person.fullName}: DDMMYY only`);
+    }
   } else if (formatHint==="name4+last4") {
     namePrefixes.forEach(np=>cardLast4s.forEach(l4=>add(np+l4,`${person.fullName}: name4+last4`)));
   } else if (formatHint==="name4+dob" || formatHint==="dob") {
@@ -148,8 +158,16 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
   const patterns4 = [
     /(?:x{3,}|\*{3,}|#{3,})(\d{4})(?!\d)/gi,
     /(?:ending|ending in|ending with|last 4|last four)\s*:?\s*(\d{4})(?!\d)/gi,
-    /(?:account|card)\s*(?:no\.?|number|#)?\s*:?\s*(?:[xX*#]+)(\d{4})(?!\d)/gi,
-    /[xX*]{2,}(\d{4})(?!\d)/g,
+    /(?:account|card)\s*(?:no\.?|number|#)?\s*:?\s*(?:[xX*#-]+)(\d{4})(?!\d)/gi,
+    /[xX*-]{2,}(\d{4})(?!\d)/g,
+    // filename pattern: xxxx-xxxx-xx-xxxx1234
+    /[xX-]{4,}(\d{4})(?!\d)/g,
+  ];
+  // Also check patterns for 2-digit last digits (XXXX08 format)
+  const patterns2extra = [
+    /(?:x{3,}|\*{3,})(\d{2})(?!\d)/gi,
+    /card\s*number\s+[xX*-]+(\d{2})(?!\d)/gi,
+    /[xX*-]{3,}(\d{2})(?:[^\d]|$)/g,
   ];
   for (const p of patterns4) {
     p.lastIndex = 0;
@@ -159,8 +177,10 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
 
   if (!last4) {
     const patterns2 = [
-      /(?:x{2,}|\*{2,})(\d{2})(?!\d)/gi,
+      /(?:x{3,}|\*{3,})(\d{2})(?!\d)/gi,  // XXXX08
       /(?:ending|ending in)\s*:?\s*(\d{2})(?!\d)/gi,
+      /card\s*number\s+[xX*-]+(\d{2})(?!\d)/gi,
+      /[xX]{2,}-?(\d{2})(?:[^\d]|$)/g,
     ];
     for (const p of patterns2) {
       p.lastIndex = 0;
@@ -172,9 +192,14 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
   // ── Name extraction from email body ───────────────────────────────────────
   let nameHint = null;
   const namePatterns = [
-    /(?:dear|hi|hello)\s+(?:mr\.?\s*|mrs\.?\s*|ms\.?\s*|dr\.?\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/,
-    /(?:dear|hi|hello)\s+([A-Z]{2,}(?:\s+[A-Z]{2,})?)/,
+    // "Hi SNEHA SUNNY," — all caps name after Hi/Dear
+    /(?:dear|hi|hello)[,\s]+(?:mr\.?\s*|mrs\.?\s*|ms\.?\s*|dr\.?\s*)?([A-Z]{2,}(?:\s+[A-Z]{2,})*)/,
+    // "Dear Sneha Sunny" — title case
+    /(?:dear|hi|hello)[,\s]+(?:mr\.?\s*|mrs\.?\s*|ms\.?\s*|dr\.?\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/,
+    // "Cardholder Name: Sneha Sunny"
     /cardholder\s*(?:name)?\s*:?\s*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})/i,
+    // "Name: SNEHA SUNNY"
+    /\bname\s*:?\s*([A-Z]{2,}(?:\s+[A-Z]{2,})*)/,
   ];
   for (const p of namePatterns) {
     const m = fullText.match(p);
@@ -215,13 +240,23 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
   // Banks sometimes explicitly say how the password is formed
   let pwdFormatHint = null;
   const bodyLower = (bodyText||"").toLowerCase();
-  if (bodyLower.includes("date of birth") && bodyLower.includes("ddmm")) pwdFormatHint = "ddmm";
-  else if (bodyLower.includes("date of birth") && bodyLower.includes("dd/mm")) pwdFormatHint = "ddmm";
-  else if (bodyLower.includes("date of birth") && bodyLower.includes("mmdd")) pwdFormatHint = "mmdd";
-  else if (bodyLower.includes("date of birth")) pwdFormatHint = "dob";
-  else if (bodyLower.includes("first 4") && bodyLower.includes("name") && bodyLower.includes("last 4")) pwdFormatHint = "name4+last4";
-  else if (bodyLower.includes("first 4") && bodyLower.includes("name") && bodyLower.includes("dob")) pwdFormatHint = "name4+dob";
-  else if (bodyLower.includes("first 4") && bodyLower.includes("name") && (bodyLower.includes("birth") || bodyLower.includes("ddmm"))) pwdFormatHint = "name4+dob";
+  if (bodyLower.includes("ddmmyy") || bodyLower.includes("ddmmyyyy")) {
+    // RBL: "First 4 letters CAPITAL + DDMMYY"
+    if (bodyLower.includes("first 4")||bodyLower.includes("first four")) pwdFormatHint = "name4+ddmmyy";
+    else pwdFormatHint = "ddmmyy";
+  } else if ((bodyLower.includes("date of birth")||bodyLower.includes("dob")) && bodyLower.includes("ddmm")) {
+    pwdFormatHint = "ddmm";
+  } else if (bodyLower.includes("date of birth") && bodyLower.includes("dd/mm")) {
+    pwdFormatHint = "ddmm";
+  } else if (bodyLower.includes("date of birth") && bodyLower.includes("mmdd")) {
+    pwdFormatHint = "mmdd";
+  } else if (bodyLower.includes("date of birth") || bodyLower.includes("birth date")) {
+    pwdFormatHint = "dob";
+  } else if ((bodyLower.includes("first 4")||bodyLower.includes("first four")) && bodyLower.includes("name") && bodyLower.includes("last 4")) {
+    pwdFormatHint = "name4+last4";
+  } else if ((bodyLower.includes("first 4")||bodyLower.includes("first four")) && bodyLower.includes("name") && (bodyLower.includes("birth")||bodyLower.includes("ddmm"))) {
+    pwdFormatHint = "name4+dob";
+  }
 
   return { last4, last2, nameHint, emailNameHint, bank: bankFound, pwdFormatHint };
 }
@@ -370,10 +405,38 @@ async function fetchEmailWithAttachments(messageId,token){
   const msg=await gmailFetch(`users/me/messages/${messageId}?format=full`,token);
   const hdr=(name)=>msg.payload?.headers?.find(h=>h.name===name)?.value||"";
   const toAddress=hdr("To")||hdr("Delivered-To")||"";
-  const pdfParts=[];let bodyText="";
-  function collect(parts){if(!parts)return;for(const p of parts){if(p.mimeType==="text/plain"&&p.body?.data){try{bodyText+=atob(p.body.data.replace(/-/g,"+").replace(/_/g,"/"));}catch{}}if(p.mimeType==="application/pdf"||(p.filename&&p.filename.toLowerCase().endsWith(".pdf")))pdfParts.push(p);if(p.parts)collect(p.parts);}}
+  const pdfParts=[];let bodyText="";let htmlText="";
+  function collect(parts){
+    if(!parts)return;
+    for(const p of parts){
+      // Read plain text
+      if(p.mimeType==="text/plain"&&p.body?.data){
+        try{bodyText+=atob(p.body.data.replace(/-/g,"+").replace(/_/g,"/"));}catch{}
+      }
+      // Read HTML and strip tags for better text extraction
+      if(p.mimeType==="text/html"&&p.body?.data){
+        try{
+          const html=atob(p.body.data.replace(/-/g,"+").replace(/_/g,"/"));
+          // Strip HTML tags, decode entities, normalize whitespace
+          const stripped=html
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi,"")
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi,"")
+            .replace(/<[^>]+>/g," ")
+            .replace(/&nbsp;/g," ").replace(/&amp;/g,"&")
+            .replace(/&lt;/g,"<").replace(/&gt;/g,">")
+            .replace(/&#\d+;/g," ")
+            .replace(/\s+/g," ").trim();
+          htmlText+=stripped;
+        }catch{}
+      }
+      if(p.mimeType==="application/pdf"||(p.filename&&p.filename.toLowerCase().endsWith(".pdf")))pdfParts.push(p);
+      if(p.parts)collect(p.parts);
+    }
+  }
   collect(msg.payload?.parts);
-  return{messageId,subject:hdr("Subject"),date:hdr("Date"),toAddress,pdfParts,bodyText}; // eslint-disable-line
+  // Use plain text if available, otherwise fall back to HTML-stripped text
+  const finalBodyText = bodyText.trim() || htmlText.trim();
+  return{messageId,subject:hdr("Subject"),date:hdr("Date"),toAddress,pdfParts,bodyText:finalBodyText}; // eslint-disable-line
 }
 async function downloadAttachment(msgId,attId,token){const d=await gmailFetch(`users/me/messages/${msgId}/attachments/${attId}`,token);return d.data.replace(/-/g,"+").replace(/_/g,"/");}
 
