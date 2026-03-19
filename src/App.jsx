@@ -73,7 +73,7 @@ function generatePasswords(person, last4Hint) {
 
 // findPersonForCard is now defined inside extractHintsFromEmail block above
 
-function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHint, emailText) {
+function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, emailText) {
   const results = [];
   const seen = new Set();
   const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)&&results.length<80){seen.add(pwd);results.push({pwd,label});} };
@@ -81,7 +81,7 @@ function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHin
   console.log("[PwdResolve] hints:", {last4Hint,last2Hint,nameHint,bankHint,peopleCount:people?.length});
 
   // 1. Find best matching person using all available hints
-  const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailText);
+  const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText);
   console.log("[PwdResolve] matched person:", person?.fullName||"none");
 
   if (person) {
@@ -121,45 +121,122 @@ function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHin
   return results;
 }
 
-function extractHintsFromEmail(subject, bodyText) {
-  const text = (subject+" "+(bodyText||"")).toLowerCase();
+function extractHintsFromEmail(subject, bodyText, toAddress) {
+  const fullText = subject+" "+(bodyText||"");
+  const text = fullText.toLowerCase();
 
-  // Try last 4 digits first
-  const last4Match = text.match(/(?:ending|xxxx|card\s*(?:no\.?|number)?|last\s*4\s*(?:digits?)?)\s*:?\s*(\d{4})/i);
-  const last4 = last4Match?.[1]||null;
+  // ── Card number extraction ────────────────────────────────────────────────
+  let last4 = null, last2 = null;
 
-  // Try last 2 digits if no 4-digit match
-  const last2Match = !last4 && (
-    text.match(/(?:ending|xxxx|card\s*(?:no\.?|number)?)\s*:?\s*(?:xx|\*{2,})(\d{2})(?!\d)/i) ||
-    text.match(/(?:ending|ending in|ending with)\s*:?\s*(\d{2})(?!\d)/i) ||
-    text.match(/x{2,}(\d{2})(?!\d)/i)
-  );
-  const last2 = last2Match?.[1]||null;
+  // Patterns: XXXX7456, xxxx7456, ****7456, X7456, ending 7456
+  const patterns4 = [
+    /(?:x{3,}|\*{3,}|#{3,})(\d{4})(?!\d)/gi,
+    /(?:ending|ending in|ending with|last 4|last four)\s*:?\s*(\d{4})(?!\d)/gi,
+    /(?:account|card)\s*(?:no\.?|number|#)?\s*:?\s*(?:[xX*#]+)(\d{4})(?!\d)/gi,
+    /[xX*]{2,}(\d{4})(?!\d)/g,
+  ];
+  for (const p of patterns4) {
+    p.lastIndex = 0;
+    const m = p.exec(fullText);
+    if (m?.[1]) { last4 = m[1]; break; }
+  }
 
-  // Extract person name from email text
-  // Look for patterns like "Dear Ravi Sharma", "Hi Ravi", "Dear Mr. Ravi"
-  const nameMatch = text.match(/(?:dear\s+(?:mr\.?\s*|mrs\.?\s*|ms\.?\s*)?|hi\s+|hello\s+)([a-z]+(?:\s+[a-z]+)?)/i);
-  const nameHint = nameMatch?.[1]?.trim()||null;
+  if (!last4) {
+    const patterns2 = [
+      /(?:x{2,}|\*{2,})(\d{2})(?!\d)/gi,
+      /(?:ending|ending in)\s*:?\s*(\d{2})(?!\d)/gi,
+    ];
+    for (const p of patterns2) {
+      p.lastIndex = 0;
+      const m = p.exec(fullText);
+      if (m?.[1]) { last2 = m[1]; break; }
+    }
+  }
 
-  const banks = ["hdfc","icici","sbi","axis","kotak","citibank","citi","amex","indusind","yes bank","rbl","idfc","hsbc","standard chartered","pnb","union","canara","bob","federal","lit","au","scb","bnp","hsbc","bob","pnb","rbl"];
-  const bankFound = banks.find(b=>text.includes(b))||null;
+  // ── Name extraction from email body ───────────────────────────────────────
+  let nameHint = null;
+  const namePatterns = [
+    /(?:dear|hi|hello)\s+(?:mr\.?\s*|mrs\.?\s*|ms\.?\s*|dr\.?\s*)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/,
+    /(?:dear|hi|hello)\s+([A-Z]{2,}(?:\s+[A-Z]{2,})?)/,
+    /cardholder\s*(?:name)?\s*:?\s*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})/i,
+  ];
+  for (const p of namePatterns) {
+    const m = fullText.match(p);
+    if (m?.[1]?.trim().length > 2) { nameHint = m[1].trim(); break; }
+  }
 
-  return { last4, last2, nameHint, bank: bankFound };
+  // ── Name from recipient email address (e.g. SNEHADIA2019@gmail.com) ───────
+  // Extract alphabetic prefix from email username
+  let emailNameHint = null;
+  if (toAddress) {
+    const username = toAddress.split("@")[0]; // e.g. "SNEHADIA2019"
+    const alphaOnly = username.replace(/[^a-zA-Z]/g,""); // "SNEHADIA"
+    if (alphaOnly.length >= 3) {
+      emailNameHint = alphaOnly.toLowerCase(); // "snehadia"
+    }
+  }
+
+  // ── Bank detection ────────────────────────────────────────────────────────
+  const bankMap = {
+    "idfc first":"idfc","idfc":"idfc","first wow":"idfc","first bank":"idfc",
+    "hdfc":"hdfc","icici":"icici","sbi":"sbi","sbi card":"sbi",
+    "axis":"axis","kotak":"kotak","citibank":"citi","citi":"citi",
+    "amex":"amex","american express":"amex","indusind":"indusind",
+    "yes bank":"yes","rbl":"rbl","hsbc":"hsbc","pnb":"pnb",
+    "standard chartered":"scb","union bank":"union","canara":"canara",
+    "bank of baroda":"bob","federal":"federal","au small":"au","au bank":"au",
+    "bpcl":"sbi","octane":"sbi","simply click":"sbi","millennia":"hdfc",
+    "regalia":"hdfc","flipkart":"axis","magnus":"axis","lit":"lit",
+  };
+  let bankFound = null;
+  for (const [key,val] of Object.entries(bankMap)) {
+    if (text.includes(key)) { bankFound = val; break; }
+  }
+
+  return { last4, last2, nameHint, emailNameHint, bank: bankFound };
 }
 
 // Match a person from registry using multiple signals
-function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailText) {
+function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailNameHint, emailText) {
   if (!people||!people.length) return null;
   const text = (emailText||"").toLowerCase();
 
-  // Priority 1: exact last4 match
+  // Priority 1: exact last4 card match
   if (last4Hint) {
     for (const p of people) {
       if (p.cards?.some(c=>c.last4===last4Hint)) return p;
     }
   }
 
-  // Priority 2: last2 + name match together (strong signal)
+  // Priority 2: email address prefix matches person name
+  // e.g. "SNEHADIA2019" → matches "SNEHA" in "SNEHA SUNNY"
+  if (emailNameHint) {
+    for (const p of people) {
+      const nameWords = (p.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
+      // Check if email prefix starts with or contains any name word (min 4 chars)
+      const matched = nameWords.some(w => 
+        w.length >= 4 && (
+          emailNameHint.toUpperCase().startsWith(w) ||
+          emailNameHint.toUpperCase().includes(w)
+        )
+      );
+      if (matched) {
+        // Extra confidence: also check last2/last4 if available
+        if (last4Hint && p.cards?.some(c=>c.last4===last4Hint)) return p;
+        if (last2Hint && p.cards?.some(c=>c.last4?.endsWith(last2Hint))) return p;
+        if (!last4Hint && !last2Hint) return p; // no card hint, name match is enough
+      }
+    }
+    // Retry without card check if we had card hints but no match
+    if (last4Hint||last2Hint) {
+      for (const p of people) {
+        const nameWords = (p.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
+        if (nameWords.some(w=>w.length>=4&&emailNameHint.toUpperCase().startsWith(w))) return p;
+      }
+    }
+  }
+
+  // Priority 3: last2 + body name match together
   if (last2Hint && nameHint) {
     for (const p of people) {
       const nameWords = (p.fullName||"").toLowerCase().split(" ");
@@ -169,7 +246,7 @@ function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailText) {
     }
   }
 
-  // Priority 3: name match alone (from "Dear Ravi" in email)
+  // Priority 4: name from email body ("Dear Ravi")
   if (nameHint) {
     for (const p of people) {
       const nameWords = (p.fullName||"").toLowerCase().split(" ");
@@ -177,16 +254,16 @@ function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailText) {
     }
   }
 
-  // Priority 4: name anywhere in email subject/body
+  // Priority 5: name anywhere in full email text
   for (const p of people) {
     const nameWords = (p.fullName||"").toLowerCase().split(" ");
-    if (nameWords.some(part=>part.length>2&&text.includes(part))) return p;
+    if (nameWords.some(part=>part.length>3&&text.includes(part))) return p;
   }
 
-  // Priority 5: last2 match alone
+  // Priority 6: last2 alone (only if unambiguous)
   if (last2Hint) {
     const matched = people.filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
-    if (matched.length===1) return matched[0]; // only return if unambiguous
+    if (matched.length===1) return matched[0];
   }
 
   return null;
@@ -274,10 +351,11 @@ async function fetchStatementEmails(token, afterDate=null){
 async function fetchEmailWithAttachments(messageId,token){
   const msg=await gmailFetch(`users/me/messages/${messageId}?format=full`,token);
   const hdr=(name)=>msg.payload?.headers?.find(h=>h.name===name)?.value||"";
+  const toAddress=hdr("To")||hdr("Delivered-To")||"";
   const pdfParts=[];let bodyText="";
   function collect(parts){if(!parts)return;for(const p of parts){if(p.mimeType==="text/plain"&&p.body?.data){try{bodyText+=atob(p.body.data.replace(/-/g,"+").replace(/_/g,"/"));}catch{}}if(p.mimeType==="application/pdf"||(p.filename&&p.filename.toLowerCase().endsWith(".pdf")))pdfParts.push(p);if(p.parts)collect(p.parts);}}
   collect(msg.payload?.parts);
-  return{messageId,subject:hdr("Subject"),date:hdr("Date"),pdfParts,bodyText}; // eslint-disable-line
+  return{messageId,subject:hdr("Subject"),date:hdr("Date"),toAddress,pdfParts,bodyText}; // eslint-disable-line
 }
 async function downloadAttachment(msgId,attId,token){const d=await gmailFetch(`users/me/messages/${msgId}/attachments/${attId}`,token);return d.data.replace(/-/g,"+").replace(/_/g,"/");}
 
@@ -753,15 +831,16 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
       const newRecords=[];
       for(const{id}of fresh){
         try{
-          const{subject,date,pdfParts,bodyText}=await fetchEmailWithAttachments(id,gmailToken);
+          const{subject,date,toAddress,pdfParts,bodyText}=await fetchEmailWithAttachments(id,gmailToken);
           log(`📧 Subject: "${subject}"`);
           log(`   Date: ${date} · PDF attachments found: ${pdfParts.length}`);
           if(pdfParts.length===0){
             log(`   ↳ ⚠ No PDF attachment — skipping. (MIME types: ${bodyText.slice(0,50)})`, "warn");
             onProcessed(id);continue;
           }
-          const{last4:emailLast4,last2:emailLast2,nameHint:emailName,bank:emailBank}=extractHintsFromEmail(subject,bodyText);
-          log(`   ↳ Hints — Bank: ${emailBank||"not detected"} · Card: ${emailLast4?"••••"+emailLast4:emailLast2?"••"+emailLast2:"not detected"} · Name: ${emailName||"not detected"}`);
+          const{last4:emailLast4,last2:emailLast2,nameHint:emailName,emailNameHint,bank:emailBank}=extractHintsFromEmail(subject,bodyText,toAddress);
+          log(`   ↳ Hints — Bank: ${emailBank||"?"} · Card: ${emailLast4?"••••"+emailLast4:emailLast2?"••"+emailLast2:"?"} · Name: ${emailName||"?"} · Email: ${emailNameHint||"?"}`);
+          if(!emailLast4&&!emailLast2&&!emailName&&!emailNameHint) log(`   ↳ 📋 Body preview: "${(bodyText||"").slice(0,150).replace(/\n/g," ")}"`,"warn");
           for(const part of pdfParts){
             const fname=part.filename||"attachment.pdf";
             const hasAttachId=!!part.body?.attachmentId;
@@ -783,8 +862,8 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
             const raw=atob(b64raw);const bytes=new Uint8Array(raw.length);
             for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
             log(`   ↳ PDF size: ${(bytes.length/1024).toFixed(1)} KB`);
-            const pwdList=resolvePasswords(vault,people||[],emailBank||subject,emailLast4,emailLast2,emailName,subject+" "+bodyText);
-            log(`   ↳ 🔐 ${pwdList.length} passwords to try (matched by: ${emailLast4?"last4":emailLast2?"last2":emailName?"name":"none"})`);
+            const pwdList=resolvePasswords(vault,people||[],emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,subject+" "+bodyText);
+            log(`   ↳ 🔐 ${pwdList.length} passwords to try (matched by: ${emailLast4?"last4":emailLast2?"last2":emailName?"name":emailNameHint?"email-addr":"none"})`);
             if(pwdList.length>0) log(`   ↳ First 3: ${pwdList.slice(0,3).map(p=>p.pwd).join(", ")}`);
             let imgBase64=null;
             try{
@@ -1084,7 +1163,7 @@ export default function App(){
         let imgBase64;
         if(item.file.type==="application/pdf"){
           const bytes=new Uint8Array(await item.file.arrayBuffer());
-          const pwdList=resolvePasswords(vault,people,item.file.name,"","","","");
+          const pwdList=resolvePasswords(vault,people,item.file.name,"","","","","");
           try{const{imgBase64:img}=await tryPasswordsOnPDF(bytes,pwdList);imgBase64=img;}
           catch(e){
             if(e.message==="WRONG_PASSWORD"){
