@@ -134,9 +134,6 @@ export const DEFAULT_BANK_RULES = [
   { id:"scb",     bankName:"Standard Chartered", formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
 ];
 
-
-}
-
 // findPersonForCard is now defined inside extractHintsFromEmail block above
 
 export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, formatHint, emailText) {
