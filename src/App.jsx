@@ -704,8 +704,7 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
           onProcessed(id);
         }catch(err){
           log(`❌ Error processing email: ${err.message}`,"error");
-          log(`   Stack: ${err.stack?.split('
-')[1]||""}`,"error");
+          log(`   Stack: ${(err.stack||'').split('\n')[1]||""}`,"error");
           onProcessed(id);
         }
       }
