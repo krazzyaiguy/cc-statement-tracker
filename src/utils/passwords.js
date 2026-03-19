@@ -62,6 +62,7 @@ export function generatePasswords(person, last4Hint, formatHint=null) {
   dateSuffixes.forEach(ds=>cardLast4s.forEach(l4=>add(ds+l4,`${person.fullName}: date+last4`)));
   cardLast4s.forEach(l4=>dateSuffixes.forEach(ds=>add(l4+ds,`${person.fullName}: last4+date`)));
   return passwords;
+}
 
 // ── Generate passwords using a specific formula ───────────────────────────────
 export function generateByFormula(formula, person, last4Hint) {
