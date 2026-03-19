@@ -230,9 +230,17 @@ export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, 
     }
   }
 
-  // 2. last2 fallback
+  // 2. last2 fallback — filter by bank name to avoid wrong person
   if (results.length===0 && last2Hint) {
-    const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
+    const bank = (bankHint||"").toLowerCase();
+    let matched = (people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
+    // If bank is known, prefer people whose card for that bank ends in last2
+    if (bank && matched.length > 1) {
+      const bankFiltered = matched.filter(p=>p.cards?.some(c=>
+        c.last4?.endsWith(last2Hint) && c.bankName?.toLowerCase().includes(bank)
+      ));
+      if (bankFiltered.length > 0) matched = bankFiltered;
+    }
     matched.forEach(p=>generatePasswords(p,last2Hint,formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
