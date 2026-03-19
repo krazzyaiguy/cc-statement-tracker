@@ -768,25 +768,45 @@ export default function App(){
   useEffect(()=>{ if(settings) ls.set(SETTINGS_KEY,settings); },[settings]);
 
   // Save people to localStorage always + Firebase when signed in
-  const peopleRef=useRef(false);
+  // Save to localStorage + Firebase on every change
+  // Using JSON comparison to avoid saving on initial load from Firebase
+  const prevPeopleRef=useRef(null);
   useEffect(()=>{
-    if(!peopleRef.current){peopleRef.current=true;return;}
-    try{localStorage.setItem('cc_people_v1',JSON.stringify(people));}catch{}
-    if(user) savePeople(user.uid,people).then(ok=>console.log('[Firebase] savePeople:',ok,people.length,'entries')).catch(e=>console.error('[Firebase] savePeople FAILED:',e.code,e.message));
-  },[people]); // eslint-disable-line
+    const json=JSON.stringify(people);
+    if(prevPeopleRef.current===json) return; // no real change
+    prevPeopleRef.current=json;
+    try{localStorage.setItem('cc_people_v1',json);}catch{}
+    if(user&&people.length>=0){
+      savePeople(user.uid,people)
+        .then(ok=>console.log('[Firebase] savePeople:',ok,people.length,'entries'))
+        .catch(e=>console.error('[Firebase] savePeople FAILED:',e.code,e.message));
+    }
+  },[people,user]); // eslint-disable-line
 
-  // Save vault to localStorage always + Firebase when signed in
-  const vaultRef=useRef(false);
+  const prevVaultRef=useRef(null);
   useEffect(()=>{
-    if(!vaultRef.current){vaultRef.current=true;return;}
-    try{localStorage.setItem('cc_vault_v2',JSON.stringify(vault));}catch{}
-    if(user) saveVault(user.uid,vault).then(ok=>console.log('[Firebase] saveVault:',ok,vault.length,'entries')).catch(e=>console.error('[Firebase] saveVault FAILED:',e.code,e.message));
-  },[vault]); // eslint-disable-line
+    const json=JSON.stringify(vault);
+    if(prevVaultRef.current===json) return;
+    prevVaultRef.current=json;
+    try{localStorage.setItem('cc_vault_v2',json);}catch{}
+    if(user&&vault.length>=0){
+      saveVault(user.uid,vault)
+        .then(ok=>console.log('[Firebase] saveVault:',ok,vault.length,'entries'))
+        .catch(e=>console.error('[Firebase] saveVault FAILED:',e.code,e.message));
+    }
+  },[vault,user]); // eslint-disable-line
 
-  // Save records to Firebase when signed in
+  const prevRecordsRef=useRef(null);
   useEffect(()=>{
-    if(user&&records.length>0) saveRecords(user.uid,records).then(ok=>console.log('[Firebase] saveRecords:',ok,records.length,'entries')).catch(e=>console.error('[Firebase] saveRecords FAILED:',e.code,e.message));
-  },[user,records]); // eslint-disable-line
+    const json=JSON.stringify(records);
+    if(prevRecordsRef.current===json) return;
+    prevRecordsRef.current=json;
+    if(user&&records.length>0){
+      saveRecords(user.uid,records)
+        .then(ok=>console.log('[Firebase] saveRecords:',ok,records.length,'entries'))
+        .catch(e=>console.error('[Firebase] saveRecords FAILED:',e.code,e.message));
+    }
+  },[records,user]); // eslint-disable-line
 
   // Save processedIds to Firebase
   useEffect(()=>{
