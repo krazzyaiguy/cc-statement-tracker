@@ -505,7 +505,6 @@ export function BankRulesPanel({ rules, onUpdate }) {
   );
 }
 
-function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords,processedIds,onProcessed,onResetProcessed}){
 export function SettingsPanel({settings,onUpdate,onReset}){
   const[geminiKey,setGeminiKey]=useState(settings.geminiKey||"");
   const[googleClientId,setGoogleClientId]=useState(settings.googleClientId||"");
