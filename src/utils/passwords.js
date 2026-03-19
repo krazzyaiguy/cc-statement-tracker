@@ -168,6 +168,18 @@ export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, 
       }
       targetPeople = allMatched.length > 0 ? allMatched : [];
     }
+    // last2 fallback with bank filter — prevents OMPR (HDFC ••40) matching instead of Shubham (RBL ••40)
+    if (targetPeople.length === 0 && last2Hint) {
+      let matched = (people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
+      if (matched.length > 1) {
+        // Filter by bank name on the card
+        const bankFiltered = matched.filter(p=>p.cards?.some(c=>
+          c.last4?.endsWith(last2Hint) && c.bankName?.toLowerCase().includes(bankKey)
+        ));
+        if (bankFiltered.length > 0) matched = bankFiltered;
+      }
+      targetPeople = matched;
+    }
     if (targetPeople.length === 0) {
       const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText, cardPrefix);
       targetPeople = person ? [person] : (people||[]);
