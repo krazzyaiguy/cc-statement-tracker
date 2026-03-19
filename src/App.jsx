@@ -9,7 +9,7 @@ import {
 } from "./firebase";
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GEMINI_MODEL   = "gemini-2.5-flash-preview-04-17";
+const GEMINI_MODEL   = "gemini-2.0-flash";
 const SETTINGS_KEY   = "cc_settings_v2";   // localStorage fallback for settings only
 const GMAIL_SCOPES   = "https://www.googleapis.com/auth/gmail.readonly";
 
