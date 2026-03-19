@@ -319,6 +319,10 @@ export const FORMULA_OPTIONS = [
   { value:"name4l+ddmmyyyy",    label:"lowercase: name(4) + DDMMYYYY",  example:"ravi05121975" },
   { value:"name4l+yyyy",        label:"lowercase: name(4) + YYYY",      example:"ravi1975" },
   { value:"name4l+last4",       label:"lowercase: name(4) + Last4",     example:"shub2308" },
+  // ── DATE + CARD (SBI style) ──────────────────────────────────────────────
+  { value:"ddmmyyyy+last4",     label:"DDMMYYYY + Last4 (SBI)",          example:"01041980 1234" },
+  { value:"ddmmyy+last4",       label:"DDMMYY + Last4",                  example:"010480 1234" },
+  { value:"ddmm+last4",         label:"DDMM + Last4",                    example:"0104 1234" },
   // ── DATE ONLY ─────────────────────────────────────────────────────────────
   { value:"ddmm",               label:"DDMM only (no name)",             example:"0512" },
   { value:"ddmmyy",             label:"DDMMYY only",                     example:"051275" },
