@@ -11,6 +11,7 @@ import {
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const AI_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"; // Groq — free, no card needed
 const SETTINGS_KEY   = "cc_settings_v2";   // localStorage fallback for settings only
+const BANK_RULES_KEY  = "cc_bank_rules_v1"; // per-bank password formula rules
 const GMAIL_SCOPES   = "https://www.googleapis.com/auth/gmail.readonly";
 
 const EXTRACTION_PROMPT = `You are a credit card statement parser. Extract key billing information.
@@ -95,16 +96,105 @@ function generatePasswords(person, last4Hint, formatHint=null) {
   dateSuffixes.forEach(ds=>cardLast4s.forEach(l4=>add(ds+l4,`${person.fullName}: date+last4`)));
   cardLast4s.forEach(l4=>dateSuffixes.forEach(ds=>add(l4+ds,`${person.fullName}: last4+date`)));
   return passwords;
+// ── Generate passwords using a specific formula ───────────────────────────────
+function generateByFormula(formula, person, last4Hint) {
+  const name = (person.fullName||"").toUpperCase().replace(/[^A-Z]/g,"");
+  const dob  = person.dob||"";
+  const parts = dob.includes("/")?dob.split("/"):dob.includes("-")?dob.split("-"):[dob];
+  const dd = (parts[0]||"").padStart(2,"0");
+  const mm = (parts[1]||"").padStart(2,"0");
+  const yyyy = parts[2]||"";
+  const yy = yyyy.slice(-2);
+  const n4 = name.slice(0,4);
+  const n3 = name.slice(0,3);
+  const cardLast4s = [];
+  if (last4Hint) cardLast4s.push(last4Hint);
+  (person.cards||[]).forEach(c=>{ if(c.last4&&!cardLast4s.includes(c.last4)) cardLast4s.push(c.last4); });
+
+  const results = [];
+  const seen = new Set();
+  const add = (pwd) => {
+    if(!pwd||seen.has(pwd.toLowerCase())) return;
+    seen.add(pwd.toLowerCase());
+    results.push(pwd);
+    if(pwd!==pwd.toLowerCase()) { seen.add(pwd.toLowerCase()); results.push(pwd.toLowerCase()); }
+  };
+
+  switch(formula) {
+    case "name4+ddmm":
+      add(n4+dd+mm); add(n3+dd+mm); break;
+    case "name4+mmdd":
+      add(n4+mm+dd); add(n3+mm+dd); break;
+    case "name4+ddmmyy":
+      add(n4+dd+mm+yy); add(n3+dd+mm+yy); break;
+    case "name4+ddmmyyyy":
+      add(n4+dd+mm+yyyy); add(n3+dd+mm+yyyy); break;
+    case "name4+mmddyy":
+      add(n4+mm+dd+yy); break;
+    case "name4+yyyy":
+      add(n4+yyyy); add(n3+yyyy); break;
+    case "name4+last4":
+      cardLast4s.forEach(l4=>{ add(n4+l4); add(n3+l4); }); break;
+    case "ddmm":
+      add(dd+mm); add(mm+dd); break;
+    case "ddmmyy":
+      add(dd+mm+yy); break;
+    case "ddmmyyyy":
+      add(dd+mm+yyyy); break;
+    case "name4+dob_ddmm":
+      add(n4+dd+mm); add(n4+mm+dd); break;
+    default:
+      break;
+  }
+  return results;
+}
+
+// Common Indian bank password formulas (pre-filled defaults)
+const DEFAULT_BANK_RULES = [
+  { id:"hdfc",    bankName:"HDFC",               formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
+  { id:"icici",   bankName:"ICICI",              formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
+  { id:"sbi",     bankName:"SBI",                formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
+  { id:"rbl",     bankName:"RBL",                formula:"name4+ddmmyy",   notes:"e.g. ANSH140987" },
+  { id:"idfc",    bankName:"IDFC FIRST",         formula:"ddmm",           notes:"e.g. 1409 (just DOB DDMM)" },
+  { id:"axis",    bankName:"Axis",               formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
+  { id:"kotak",   bankName:"Kotak",              formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
+  { id:"indusind",bankName:"IndusInd",           formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
+  { id:"amex",    bankName:"Amex",               formula:"name4+last4",    notes:"e.g. RAVI1234" },
+  { id:"yes",     bankName:"Yes Bank",           formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
+  { id:"lit",     bankName:"LIT",                formula:"name4+last4",    notes:"e.g. SHUB2308" },
+  { id:"au",      bankName:"AU Small Finance",   formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
+  { id:"scb",     bankName:"Standard Chartered", formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
+];
+
+
 }
 
 // findPersonForCard is now defined inside extractHintsFromEmail block above
 
-function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, formatHint, emailText) {
+function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, formatHint, emailText) {
   const results = [];
   const seen = new Set();
   const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)&&results.length<80){seen.add(pwd);results.push({pwd,label});} };
 
-  console.log("[PwdResolve] hints:", {last4Hint,last2Hint,nameHint,bankHint,peopleCount:people?.length});
+  console.log("[PwdResolve] hints:", {last4Hint,last2Hint,nameHint,bankHint,peopleCount:people?.length,bankRulesCount:bankRules?.length});
+
+  // 0. Bank Rules: if we know the bank, use ONLY the defined formula (fastest path)
+  const bankKey = (bankHint||"").toLowerCase();
+  const matchedRule = (bankRules||[]).find(r=>bankKey.includes(r.bankName.toLowerCase())||r.bankName.toLowerCase().includes(bankKey.split(" ")[0]));
+  if (matchedRule && matchedRule.formula !== "custom") {
+    console.log("[PwdResolve] Using bank rule:", matchedRule.bankName, matchedRule.formula);
+    const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText);
+    const targetPeople = person ? [person] : (people||[]);
+    const cardHint = last4Hint || last2Hint || "";
+    targetPeople.forEach(p => {
+      const pwds = generateByFormula(matchedRule.formula, p, cardHint);
+      pwds.forEach(pwd => addPwd(pwd, `${matchedRule.bankName} rule: ${matchedRule.formula}`));
+    });
+    console.log("[PwdResolve] Bank rule generated:", results.length, "passwords. First:", results[0]?.pwd);
+    // Still add vault as fallback
+    (vault||[]).forEach(e=>addPwd(e.password,`Vault: ${e.bankName||""}`));
+    return results;
+  }
 
   // 1. Find best matching person using all available hints
   const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText);
@@ -840,7 +930,115 @@ function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
 }
 
 // ─── GMAIL SYNC PANEL ─────────────────────────────────────────────────────────
-function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onProcessed,onResetProcessed}){
+
+// ── BANK RULES PANEL ─────────────────────────────────────────────────────────
+const FORMULA_OPTIONS = [
+  { value:"name4+ddmm",     label:"Name(4) + DDMM",      example:"RAVI0512" },
+  { value:"name4+mmdd",     label:"Name(4) + MMDD",      example:"RAVI1205" },
+  { value:"name4+ddmmyy",   label:"Name(4) + DDMMYY",    example:"ANSH140987" },
+  { value:"name4+ddmmyyyy", label:"Name(4) + DDMMYYYY",  example:"RAVI05121975" },
+  { value:"name4+mmddyy",   label:"Name(4) + MMDDYY",    example:"RAVI120587" },
+  { value:"name4+yyyy",     label:"Name(4) + YYYY",      example:"RAVI1975" },
+  { value:"name4+last4",    label:"Name(4) + Last4Digits",example:"SHUB2308" },
+  { value:"ddmm",           label:"DDMM only (no name)",  example:"0512" },
+  { value:"ddmmyy",         label:"DDMMYY only",          example:"051275" },
+  { value:"ddmmyyyy",       label:"DDMMYYYY only",        example:"05121975" },
+];
+
+function BankRulesPanel({ rules, onUpdate }) {
+  const [editId, setEditId] = useState(null);
+  const [editFormula, setEditFormula] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [addBank, setAddBank] = useState("");
+  const [addFormula, setAddFormula] = useState("name4+ddmm");
+  const [addNotes, setAddNotes] = useState("");
+
+  const startEdit = (rule) => { setEditId(rule.id); setEditFormula(rule.formula); setEditNotes(rule.notes||""); };
+  const saveEdit = () => {
+    onUpdate(rules.map(r=>r.id===editId?{...r,formula:editFormula,notes:editNotes}:r));
+    setEditId(null);
+  };
+  const addRule = () => {
+    if(!addBank.trim()) return;
+    const newRule = { id: addBank.toLowerCase().replace(/\s+/g,"-")+"-"+Date.now(), bankName:addBank.trim(), formula:addFormula, notes:addNotes };
+    onUpdate([...rules, newRule]);
+    setAddBank(""); setAddFormula("name4+ddmm"); setAddNotes("");
+  };
+  const removeRule = (id) => onUpdate(rules.filter(r=>r.id!==id));
+  const resetDefaults = () => { if(window.confirm("Reset to default bank rules?")) onUpdate(DEFAULT_BANK_RULES); };
+
+  return (
+    <div>
+      <p style={{color:"#475569",fontSize:12,lineHeight:1.8,marginBottom:16}}>
+        Define the exact password formula for each bank. The app will try <strong style={{color:"#94a3b8"}}>only these combinations</strong> — no more 80 wrong attempts.
+      </p>
+
+      {/* Add custom bank */}
+      <div style={{...S.card,padding:"14px",marginBottom:16}}>
+        <div style={{color:"#60a5fa",fontSize:11,fontWeight:600,marginBottom:12,letterSpacing:"0.05em"}}>+ ADD BANK RULE</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <div><label style={S.label}>Bank Name</label>
+            <input value={addBank} onChange={e=>setAddBank(e.target.value)} placeholder="e.g. HDFC, SBI" style={S.input}/>
+          </div>
+          <div><label style={S.label}>Password Formula</label>
+            <select value={addFormula} onChange={e=>setAddFormula(e.target.value)}
+              style={{...S.input,cursor:"pointer"}}>
+              {FORMULA_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label} → {f.example}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{marginBottom:10}}>
+          <label style={S.label}>Notes (optional)</label>
+          <input value={addNotes} onChange={e=>setAddNotes(e.target.value)} placeholder="e.g. e-statement@hdfc.com" style={S.input}/>
+        </div>
+        <button onClick={addRule} disabled={!addBank.trim()} style={S.btn("#1d4ed8",!addBank.trim())}>+ Add Rule</button>
+      </div>
+
+      {/* Rules list */}
+      <div style={{border:"1px solid #1e293b",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+        {rules.map((rule,idx)=>(
+          <div key={rule.id} style={{background:"#0a0e1a",borderBottom:idx<rules.length-1?"1px solid #0f1929":"none"}}>
+            {editId===rule.id ? (
+              <div style={{padding:"12px 14px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div><label style={S.label}>Formula</label>
+                    <select value={editFormula} onChange={e=>setEditFormula(e.target.value)} style={{...S.input,cursor:"pointer"}}>
+                      {FORMULA_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label} → {f.example}</option>)}
+                    </select>
+                  </div>
+                  <div><label style={S.label}>Notes</label>
+                    <input value={editNotes} onChange={e=>setEditNotes(e.target.value)} style={S.input}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={saveEdit} style={S.btn("#15803d")}>✓ Save</button>
+                  <button onClick={()=>setEditId(null)} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",fontSize:12}}>
+                <div style={{minWidth:100,color:"#e2e8f0",fontWeight:600}}>{rule.bankName}</div>
+                <div style={{flex:1}}>
+                  <span style={{background:"#1e3a5f",color:"#60a5fa",padding:"2px 8px",borderRadius:5,fontSize:11,fontFamily:"'DM Mono',monospace"}}>{rule.formula}</span>
+                  {rule.notes&&<span style={{color:"#334155",fontSize:10,marginLeft:8}}>{rule.notes}</span>}
+                </div>
+                <button onClick={()=>startEdit(rule)} style={{background:"none",border:"none",color:"#60a5fa",cursor:"pointer",fontSize:11,padding:"0 4px"}}>✏</button>
+                <button onClick={()=>removeRule(rule.id)} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:13,padding:"0 4px"}}>✕</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button onClick={resetDefaults} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>↺ Reset to Defaults</button>
+      <div style={{color:"#1e3a5f",fontSize:10,marginTop:8,lineHeight:1.7}}>
+        💡 When the bank is detected from email, the app uses ONLY this formula — no guessing needed<br/>
+        📧 Bank is detected from email subject e.g. "RBL Bank" → uses RBL rule
+      </div>
+    </div>
+  );
+}
+
+function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords,processedIds,onProcessed,onResetProcessed}){
   const[gmailToken,setGmailToken]=useState(ls.get("cc_gmail_token"));
   const[gmailEmail,setGmailEmail]=useState(ls.get("cc_gmail_email",""));
   const[syncing,setSyncing]=useState(false);
@@ -938,7 +1136,7 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
             const raw=atob(b64raw);const bytes=new Uint8Array(raw.length);
             for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
             log(`   ↳ PDF size: ${(bytes.length/1024).toFixed(1)} KB`);
-            const pwdList=resolvePasswords(vault,people||[],emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,pwdFormatHint,subject+" "+bodyText);
+            const pwdList=resolvePasswords(vault,people||[],bankRules,emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,pwdFormatHint,subject+" "+bodyText);
             log(`   ↳ 🔐 ${pwdList.length} passwords to try (matched by: ${emailLast4?"last4":emailLast2?"last2":emailName?"name":emailNameHint?"email-addr":"none"})`);
             if(pwdList.length>0) log(`   ↳ First 3: ${pwdList.slice(0,3).map(p=>p.pwd).join(", ")}`);
             let imgBase64=null;
@@ -1082,6 +1280,7 @@ export default function App(){
   const[authReady,setAuthReady] = useState(false);
   const[records,setRecords]     = useState([]);
   const[vault,setVault]         = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
+  const[bankRules,setBankRules]   = useState(()=>{ try{const v=JSON.parse(localStorage.getItem(BANK_RULES_KEY)||'null');return Array.isArray(v)?v:DEFAULT_BANK_RULES;}catch{return DEFAULT_BANK_RULES;} });
   const[people,setPeople]       = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[processedIds,setProcessedIds] = useState([]);
   const[files,setFiles]         = useState([]);
@@ -1156,6 +1355,9 @@ export default function App(){
         .catch(e=>console.error('[Firebase] savePeople FAILED:',e.code,e.message));
     }
   },[people,user]); // eslint-disable-line
+
+  // Save bankRules to localStorage
+  useEffect(()=>{ try{localStorage.setItem(BANK_RULES_KEY,JSON.stringify(bankRules));}catch{} },[bankRules]);
 
   const prevVaultRef=useRef(null);
   useEffect(()=>{
@@ -1239,7 +1441,7 @@ export default function App(){
         let imgBase64;
         if(item.file.type==="application/pdf"){
           const bytes=new Uint8Array(await item.file.arrayBuffer());
-          const pwdList=resolvePasswords(vault,people,item.file.name,"","","","",null,"");
+          const pwdList=resolvePasswords(vault,people,bankRules,item.file.name,"","","","",null,"");
           try{const{imgBase64:img}=await tryPasswordsOnPDF(bytes,pwdList);imgBase64=img;}
           catch(e){
             if(e.message==="WRONG_PASSWORD"){
@@ -1264,7 +1466,7 @@ export default function App(){
   const unpaidRecs=records.filter(r=>!r.paid);
   const unpaidTotal=unpaidRecs.reduce((s,r)=>s+(r.dueAmount||0),0);
   const currency=records.find(r=>r.currency)?.currency||"";
-  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["settings","⚙ Settings"]];
+  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["settings","⚙ Settings"]];
 
   return(
     <div style={{minHeight:"100vh",background:"#080c14",paddingBottom:48}}>
@@ -1327,7 +1529,7 @@ export default function App(){
         </div>
 
         {/* Gmail Sync */}
-        {activeTab==="gmail"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Gmail Auto-Sync</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Auto-finds CC emails, matches vault passwords, extracts data.</p><GmailSyncPanel settings={settings} vault={vault} people={people} uid={user?.uid} onNewRecords={handleNewRecords} processedIds={processedIds} onProcessed={handleProcessed} onResetProcessed={()=>setProcessedIds([])}/></div>}
+        {activeTab==="gmail"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Gmail Auto-Sync</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Auto-finds CC emails, matches vault passwords, extracts data.</p><GmailSyncPanel settings={settings} vault={vault} people={people} bankRules={bankRules} uid={user?.uid} onNewRecords={handleNewRecords} processedIds={processedIds} onProcessed={handleProcessed} onResetProcessed={()=>setProcessedIds([])}/></div>}
 
         {/* Manual Upload */}
         {activeTab==="upload"&&(
@@ -1400,6 +1602,8 @@ export default function App(){
         {activeTab==="vault"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Password Vault</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Passwords matched by bank + card number. Auto-used during sync.</p><VaultPanel vault={vault} uid={user?.uid} onAdd={handleAddVault} onUpdate={handleUpdateVault} onDelete={handleDeleteVault}/></div>}
 
         {/* Settings */}
+        {activeTab==="bankrules"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>🏦 Bank Password Rules</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Define exact password formula per bank. App tries only these — no more 80-attempt guessing.</p><BankRulesPanel rules={bankRules} onUpdate={setBankRules}/></div>}
+
         {activeTab==="settings"&&<div style={{...S.card,padding:"24px"}}>
           <h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Settings</h2>
           <p style={{color:"#334155",fontSize:11,marginBottom:20}}>Update API keys or reset all data.</p>
