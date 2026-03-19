@@ -166,13 +166,15 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
   }
 
   // ── Name from recipient email address (e.g. SNEHADIA2019@gmail.com) ───────
-  // Extract alphabetic prefix from email username
+  // Only use first 4-6 chars of email — long emails like "shubhamarorasmartyshubham"
+  // contain multiple name fragments which cause wrong matches
   let emailNameHint = null;
   if (toAddress) {
-    const username = toAddress.split("@")[0]; // e.g. "SNEHADIA2019"
-    const alphaOnly = username.replace(/[^a-zA-Z]/g,""); // "SNEHADIA"
+    const username = toAddress.split("@")[0].split("+")[0]; // handle email aliases
+    const alphaOnly = username.replace(/[^a-zA-Z]/g,""); // remove numbers
+    // Only use first 6 chars — enough to identify name without false matches
     if (alphaOnly.length >= 3) {
-      emailNameHint = alphaOnly.toLowerCase(); // "snehadia"
+      emailNameHint = alphaOnly.slice(0,6).toLowerCase(); // "shubha" not "shubhamarorasmartyshubham"
     }
   }
 
@@ -209,30 +211,18 @@ function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailNameHint
   }
 
   // Priority 2: email address prefix matches person name
-  // e.g. "SNEHADIA2019" → matches "SNEHA" in "SNEHA SUNNY"
+  // emailNameHint is already truncated to 6 chars e.g. "shubha" from "shubhamarorasmartyshubham"
+  // Match: person name word must START WITH emailNameHint OR emailNameHint must START WITH name word
   if (emailNameHint) {
+    const hint = emailNameHint.toUpperCase(); // e.g. "SHUBHA"
     for (const p of people) {
       const nameWords = (p.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
-      // Check if email prefix starts with or contains any name word (min 4 chars)
-      const matched = nameWords.some(w => 
-        w.length >= 4 && (
-          emailNameHint.toUpperCase().startsWith(w) ||
-          emailNameHint.toUpperCase().includes(w)
-        )
+      // e.g. nameWords = ["SHUBHAM", "ARORA"]
+      // Match if: "SHUBHAM".startsWith("SHUBHA") ✓ or "SHUBHA".startsWith("SHUB") ✓
+      const matched = nameWords.some(w =>
+        w.length >= 4 && (w.startsWith(hint) || hint.startsWith(w.slice(0,4)))
       );
-      if (matched) {
-        // Extra confidence: also check last2/last4 if available
-        if (last4Hint && p.cards?.some(c=>c.last4===last4Hint)) return p;
-        if (last2Hint && p.cards?.some(c=>c.last4?.endsWith(last2Hint))) return p;
-        if (!last4Hint && !last2Hint) return p; // no card hint, name match is enough
-      }
-    }
-    // Retry without card check if we had card hints but no match
-    if (last4Hint||last2Hint) {
-      for (const p of people) {
-        const nameWords = (p.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
-        if (nameWords.some(w=>w.length>=4&&emailNameHint.toUpperCase().startsWith(w))) return p;
-      }
+      if (matched) return p;
     }
   }
 
