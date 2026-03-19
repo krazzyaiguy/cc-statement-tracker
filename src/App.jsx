@@ -725,29 +725,40 @@ export default function App(){
     const unsub = onAuthChange(async(u)=>{
       setUser(u); setAuthReady(true);
       if(u){
-        // Load everything from Firebase once on login
-        // Merge strategy: local data wins if Firebase is empty
+        console.log("[Firebase] Signed in as:", u.email, "uid:", u.uid);
         try{
+          console.log("[Firebase] Loading data from Firestore...");
           const [fbVault, fbPeople, fbRecords, fbMeta] = await Promise.all([
             loadVault(u.uid), loadPeople(u.uid), loadRecords(u.uid), loadMeta(u.uid)
           ]);
-          // Vault: use Firebase if it has data, else upload local
+          console.log("[Firebase] Loaded → vault:", fbVault.length, "people:", fbPeople.length, "records:", fbRecords.length, "meta:", fbMeta);
+
           const localVault = JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');
-          if(fbVault.length>0){ setVault(fbVault); }
-          else if(localVault.length>0){ setVault(localVault); await saveVault(u.uid,localVault); }
-
-          // People: use Firebase if it has data, else upload local
           const localPeople = JSON.parse(localStorage.getItem('cc_people_v1')||'[]');
-          if(fbPeople.length>0){ setPeople(fbPeople); }
-          else if(localPeople.length>0){ setPeople(localPeople); await savePeople(u.uid,localPeople); }
+          console.log("[Firebase] Local → vault:", localVault.length, "people:", localPeople.length);
 
-          // Records: always use Firebase (source of truth)
-          if(fbRecords.length>0) setRecords(fbRecords);
+          if(fbVault.length>0){ setVault(fbVault); console.log("[Firebase] Using Firebase vault"); }
+          else if(localVault.length>0){
+            setVault(localVault);
+            const saved=await saveVault(u.uid,localVault);
+            console.log("[Firebase] Uploaded local vault to Firebase:", saved);
+          }
 
-          // Meta: settings + processedIds
+          if(fbPeople.length>0){ setPeople(fbPeople); console.log("[Firebase] Using Firebase people"); }
+          else if(localPeople.length>0){
+            setPeople(localPeople);
+            const saved=await savePeople(u.uid,localPeople);
+            console.log("[Firebase] Uploaded local people to Firebase:", saved);
+          }
+
+          if(fbRecords.length>0){ setRecords(fbRecords); console.log("[Firebase] Using Firebase records"); }
+
           if(fbMeta.settings) setSettings(s=>({...s,...fbMeta.settings}));
           if(fbMeta.processedIds) setProcessedIds(fbMeta.processedIds);
-        }catch(e){ console.error("Firebase load failed:",e); }
+          console.log("[Firebase] All data loaded successfully ✓");
+        }catch(e){
+          console.error("[Firebase] Load FAILED:", e.code, e.message);
+        }
       }
     });
     return ()=>unsub();
@@ -761,7 +772,7 @@ export default function App(){
   useEffect(()=>{
     if(!peopleRef.current){peopleRef.current=true;return;}
     try{localStorage.setItem('cc_people_v1',JSON.stringify(people));}catch{}
-    if(user) savePeople(user.uid,people).catch(()=>{});
+    if(user) savePeople(user.uid,people).then(ok=>console.log('[Firebase] savePeople:',ok,people.length,'entries')).catch(e=>console.error('[Firebase] savePeople FAILED:',e.code,e.message));
   },[people]); // eslint-disable-line
 
   // Save vault to localStorage always + Firebase when signed in
@@ -769,12 +780,12 @@ export default function App(){
   useEffect(()=>{
     if(!vaultRef.current){vaultRef.current=true;return;}
     try{localStorage.setItem('cc_vault_v2',JSON.stringify(vault));}catch{}
-    if(user) saveVault(user.uid,vault).catch(()=>{});
+    if(user) saveVault(user.uid,vault).then(ok=>console.log('[Firebase] saveVault:',ok,vault.length,'entries')).catch(e=>console.error('[Firebase] saveVault FAILED:',e.code,e.message));
   },[vault]); // eslint-disable-line
 
   // Save records to Firebase when signed in
   useEffect(()=>{
-    if(user&&records.length>0) saveRecords(user.uid,records).catch(()=>{});
+    if(user&&records.length>0) saveRecords(user.uid,records).then(ok=>console.log('[Firebase] saveRecords:',ok,records.length,'entries')).catch(e=>console.error('[Firebase] saveRecords FAILED:',e.code,e.message));
   },[user,records]); // eslint-disable-line
 
   // Save processedIds to Firebase
@@ -995,7 +1006,26 @@ export default function App(){
         {activeTab==="vault"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Password Vault</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Passwords matched by bank + card number. Auto-used during sync.</p><VaultPanel vault={vault} uid={user?.uid} onAdd={handleAddVault} onUpdate={handleUpdateVault} onDelete={handleDeleteVault}/></div>}
 
         {/* Settings */}
-        {activeTab==="settings"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Settings</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Update API keys or reset all data.</p><SettingsPanel settings={settings} onUpdate={setSettings} onReset={()=>{if(window.confirm("Reset ALL data?")){ls.del(SETTINGS_KEY);ls.del("cc_gmail_token");ls.del("cc_gmail_email");window.location.reload();}}}/></div>}
+        {activeTab==="settings"&&<div style={{...S.card,padding:"24px"}}>
+          <h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Settings</h2>
+          <p style={{color:"#334155",fontSize:11,marginBottom:20}}>Update API keys or reset all data.</p>
+          <SettingsPanel settings={settings} onUpdate={setSettings} onReset={()=>{if(window.confirm("Reset ALL data?")){ls.del(SETTINGS_KEY);ls.del("cc_gmail_token");ls.del("cc_gmail_email");window.location.reload();}}}/>
+          {user&&<div style={{marginTop:24,paddingTop:20,borderTop:"1px solid #0f172a"}}>
+            <div style={{color:"#475569",fontSize:11,marginBottom:12}}>🔥 Firebase Debug</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={async()=>{
+                const ok=await saveVault(user.uid,vault);
+                const ok2=await savePeople(user.uid,people);
+                alert(ok&&ok2?`✅ Saved! Vault: ${vault.length}, People: ${people.length}`:`❌ Save failed — check Firestore rules`);
+              }} style={{...S.btn("#1d4ed8"),fontSize:11,padding:"8px 14px"}}>Force Save to Firebase</button>
+              <button onClick={async()=>{
+                const [v,p,r]=await Promise.all([loadVault(user.uid),loadPeople(user.uid),loadRecords(user.uid)]);
+                alert(`Firebase has:\nVault: ${v.length} entries\nPeople: ${p.length} entries\nRecords: ${r.length} entries`);
+              }} style={{...S.btn("#475569"),fontSize:11,padding:"8px 14px",background:"none",border:"1px solid #1e293b",color:"#475569"}}>Check Firebase Data</button>
+            </div>
+            <div style={{color:"#1e3a5f",fontSize:10,marginTop:8}}>Open browser console (F12) to see detailed Firebase logs</div>
+          </div>}
+        </div>}
       </div>
     </div>
   );
