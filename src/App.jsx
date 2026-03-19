@@ -23,7 +23,7 @@ export default function App(){
   const[settings,setSettings]   = useState(()=>ls.get(SETTINGS_KEY));
   const[user,setUser]           = useState(null);      // Firebase auth user
   const[authReady,setAuthReady] = useState(false);
-  const[records,setRecords]     = useState([]);
+  const[records,setRecords]     = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_records_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[vault,setVault]         = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[bankRules,setBankRules]   = useState(()=>{ try{const v=JSON.parse(localStorage.getItem(BANK_RULES_KEY)||'null');return Array.isArray(v)?v:DEFAULT_BANK_RULES;}catch{return DEFAULT_BANK_RULES;} });
   const[people,setPeople]       = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
