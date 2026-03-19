@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from "react";
+import { ls } from "../utils/storage";
 import { resolvePasswords, extractHintsFromEmail } from "../utils/passwords";
 import { pdfBytesToBase64Image, tryPasswordsOnPDF, callGroq, fetchStatementEmails, fetchEmailWithAttachments, downloadAttachment } from "../utils/pdfGroqGmail";
 import { PasswordModal, S } from "./Panels";
+
+const GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly";
 
 export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords,processedIds,onProcessed,onResetProcessed}){
   const[gmailToken,setGmailToken]=useState(ls.get("cc_gmail_token"));
