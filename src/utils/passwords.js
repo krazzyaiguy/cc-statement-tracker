@@ -88,31 +88,30 @@ export function generateByFormula(formula, person, last4Hint) {
     if(pwd!==pwd.toLowerCase()) { seen.add(pwd.toLowerCase()); results.push(pwd.toLowerCase()); }
   };
 
+  const n4l=n4.toLowerCase(), n3l=n3.toLowerCase();
+
   switch(formula) {
-    case "name4+ddmm":
-      add(n4+dd+mm); add(n3+dd+mm); break;
-    case "name4+mmdd":
-      add(n4+mm+dd); add(n3+mm+dd); break;
-    case "name4+ddmmyy":
-      add(n4+dd+mm+yy); add(n3+dd+mm+yy); break;
-    case "name4+ddmmyyyy":
-      add(n4+dd+mm+yyyy); add(n3+dd+mm+yyyy); break;
-    case "name4+mmddyy":
-      add(n4+mm+dd+yy); break;
-    case "name4+yyyy":
-      add(n4+yyyy); add(n3+yyyy); break;
-    case "name4+last4":
-      cardLast4s.forEach(l4=>{ add(n4+l4); add(n3+l4); }); break;
-    case "ddmm":
-      add(dd+mm); add(mm+dd); break;
-    case "ddmmyy":
-      add(dd+mm+yy); break;
-    case "ddmmyyyy":
-      add(dd+mm+yyyy); break;
-    case "name4+dob_ddmm":
-      add(n4+dd+mm); add(n4+mm+dd); break;
-    default:
-      break;
+    // ── UPPERCASE (most banks) ───────────────────────────────────────────────
+    case "name4+ddmm":      add(n4+dd+mm); add(n3+dd+mm); break;
+    case "name4+mmdd":      add(n4+mm+dd); add(n3+mm+dd); break;
+    case "name4+ddmmyy":    add(n4+dd+mm+yy); add(n3+dd+mm+yy); break;
+    case "name4+ddmmyyyy":  add(n4+dd+mm+yyyy); add(n3+dd+mm+yyyy); break;
+    case "name4+mmddyy":    add(n4+mm+dd+yy); break;
+    case "name4+yyyy":      add(n4+yyyy); add(n3+yyyy); break;
+    case "name4+last4":     cardLast4s.forEach(l4=>{ add(n4+l4); add(n3+l4); }); break;
+    // ── LOWERCASE (ICICI and others) ────────────────────────────────────────
+    case "name4l+ddmm":     add(n4l+dd+mm); add(n3l+dd+mm); break;
+    case "name4l+mmdd":     add(n4l+mm+dd); add(n3l+mm+dd); break;
+    case "name4l+ddmmyy":   add(n4l+dd+mm+yy); add(n3l+dd+mm+yy); break;
+    case "name4l+ddmmyyyy": add(n4l+dd+mm+yyyy); add(n3l+dd+mm+yyyy); break;
+    case "name4l+mmddyy":   add(n4l+mm+dd+yy); break;
+    case "name4l+yyyy":     add(n4l+yyyy); add(n3l+yyyy); break;
+    case "name4l+last4":    cardLast4s.forEach(l4=>{ add(n4l+l4); add(n3l+l4); }); break;
+    // ── DATE ONLY ────────────────────────────────────────────────────────────
+    case "ddmm":            add(dd+mm); add(mm+dd); break;
+    case "ddmmyy":          add(dd+mm+yy); break;
+    case "ddmmyyyy":        add(dd+mm+yyyy); break;
+    default: break;
   }
   return results;
 }
@@ -120,7 +119,7 @@ export function generateByFormula(formula, person, last4Hint) {
 // Common Indian bank password formulas (pre-filled defaults)
 export const DEFAULT_BANK_RULES = [
   { id:"hdfc",    bankName:"HDFC",               formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
-  { id:"icici",   bankName:"ICICI",              formula:"name4+ddmmyyyy", notes:"e.g. RAVI05121975" },
+  { id:"icici",   bankName:"ICICI",              formula:"name4l+ddmm",    notes:"e.g. suji0501" },
   { id:"sbi",     bankName:"SBI",                formula:"name4+ddmm",     notes:"e.g. RAVI0512" },
   { id:"rbl",     bankName:"RBL",                formula:"name4+ddmmyy",   notes:"e.g. ANSH140987" },
   { id:"idfc",    bankName:"IDFC FIRST",         formula:"ddmm",           notes:"e.g. 1409 (just DOB DDMM)" },
@@ -155,8 +154,33 @@ export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, 
       const pwds = generateByFormula(matchedRule.formula, p, cardHint);
       pwds.forEach(pwd => addPwd(pwd, `${matchedRule.bankName} rule: ${matchedRule.formula}`));
     });
+    // Also try email name hint as override prefix (e.g. "mrprin" → "PRIN")
+    // This handles cases where the matched person's name differs from card name
+    if (emailNameHint && emailNameHint.length >= 4) {
+      const cleanHint = emailNameHint.replace(/^(mr|mrs|ms|dr)/i,"").toUpperCase();
+      if (cleanHint.length >= 3) {
+        const dob = targetPeople[0]?.dob||"";
+        const parts = dob.includes("/")?dob.split("/"):dob.split("-");
+        const dd=(parts[0]||"").padStart(2,"0"), mm=(parts[1]||"").padStart(2,"0"), yyyy=parts[2]||"", yy=yyyy.slice(-2);
+        const n4 = cleanHint.slice(0,4);
+        const n3 = cleanHint.slice(0,3);
+        const isLower = matchedRule.formula.startsWith("name4l");
+        const np = isLower ? n4.toLowerCase() : n4;
+        const np3 = isLower ? n3.toLowerCase() : n3;
+        if (matchedRule.formula.includes("ddmmyyyy")) {
+          addPwd(np+dd+mm+yyyy, `Email hint: ${np}+DDMMYYYY`);
+          addPwd(np3+dd+mm+yyyy, `Email hint: ${np3}+DDMMYYYY`);
+        } else if (matchedRule.formula.includes("ddmmyy")) {
+          addPwd(np+dd+mm+yy, `Email hint: ${np}+DDMMYY`);
+        } else if (matchedRule.formula.includes("ddmm")) {
+          addPwd(np+dd+mm, `Email hint: ${np}+DDMM`);
+          addPwd(np3+dd+mm, `Email hint: ${np3}+DDMM`);
+        } else if (matchedRule.formula.includes("last4") && cardHint) {
+          addPwd(np+cardHint, `Email hint: ${np}+last4`);
+        }
+      }
+    }
     console.log("[PwdResolve] Bank rule generated:", results.length, "passwords. First:", results[0]?.pwd);
-    // Still add vault as fallback
     (vault||[]).forEach(e=>addPwd(e.password,`Vault: ${e.bankName||""}`));
     return results;
   }
