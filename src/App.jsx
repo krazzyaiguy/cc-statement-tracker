@@ -36,21 +36,14 @@ const ls = {
 // ─── AUTO PASSWORD GENERATOR ─────────────────────────────────────────────────
 // Person shape: { id, fullName, dob:"DD/MM/YYYY", cards:[{last4,bankName}] }
 
-function generatePasswords(person, last4Hint) {
+function generatePasswords(person, last4Hint, formatHint=null) {
   const passwords = [];
   if (!person) return passwords;
   const name = (person.fullName||"").toUpperCase().replace(/[^A-Z]/g,"");
   const dob  = person.dob||"";
-  // Support both DD/MM/YYYY and DD-MM-YYYY formats
   const parts = dob.includes("/")?dob.split("/"):dob.includes("-")?dob.split("-"):dob.split("/");
   const dd = (parts[0]||"").padStart(2,"0"), mm = (parts[1]||"").padStart(2,"0"), yyyy = parts[2]||"";
-  console.log("[GenPwd]", person.fullName, "dob:", dob, "→ dd:", dd, "mm:", mm, "yyyy:", yyyy, "name:", name);
   const namePrefixes = [name.slice(0,4),name.slice(0,3),name.slice(0,5)].filter(Boolean);
-  const dateSuffixes = [];
-  if (dd&&mm)        { dateSuffixes.push(dd+mm); dateSuffixes.push(mm+dd); }
-  if (yyyy)          { dateSuffixes.push(yyyy); }
-  if (dd&&mm&&yyyy)  { dateSuffixes.push(dd+mm+yyyy); dateSuffixes.push(yyyy+mm+dd); }
-  if (mm&&yyyy)      { dateSuffixes.push(mm+yyyy); }
   const cardLast4s = [];
   if (last4Hint) cardLast4s.push(last4Hint);
   (person.cards||[]).forEach(c=>{ if(c.last4&&!cardLast4s.includes(c.last4)) cardLast4s.push(c.last4); });
@@ -59,9 +52,32 @@ function generatePasswords(person, last4Hint) {
     if(!pwd||seen.has(pwd.toLowerCase())) return;
     seen.add(pwd.toLowerCase());
     passwords.push({pwd,label});
-    const lower = pwd.toLowerCase();
+    const lower=pwd.toLowerCase();
     if(lower!==pwd){ seen.add(lower); passwords.push({pwd:lower,label:label+" (lower)"}); }
   };
+
+  // If bank told us the exact format, only try that format first
+  if (formatHint==="ddmm") {
+    // Only DDMM — e.g. IDFC says "password is DOB in DDMM format"
+    namePrefixes.forEach(np=>add(np+(dd+mm),`${person.fullName}: name+DDMM`));
+    if (dd&&mm) { add(dd+mm,`${person.fullName}: DDMM only`); add(mm+dd,`${person.fullName}: MMDD only`); }
+  } else if (formatHint==="name4+last4") {
+    namePrefixes.forEach(np=>cardLast4s.forEach(l4=>add(np+l4,`${person.fullName}: name4+last4`)));
+  } else if (formatHint==="name4+dob" || formatHint==="dob") {
+    namePrefixes.forEach(np=>{
+      add(np+(dd+mm),`${person.fullName}: name+DDMM`);
+      add(np+(mm+dd),`${person.fullName}: name+MMDD`);
+      if(yyyy) add(np+yyyy,`${person.fullName}: name+YYYY`);
+    });
+  }
+
+  // Always add all combinations as fallback (in case format hint is wrong)
+  const dateSuffixes = [];
+  if (dd&&mm) { dateSuffixes.push(dd+mm); dateSuffixes.push(mm+dd); }
+  if (yyyy) dateSuffixes.push(yyyy);
+  if (dd&&mm&&yyyy) { dateSuffixes.push(dd+mm+yyyy); dateSuffixes.push(yyyy+mm+dd); }
+  if (mm&&yyyy) dateSuffixes.push(mm+yyyy);
+
   namePrefixes.forEach(np=>{
     dateSuffixes.forEach(ds=>add(np+ds,`${person.fullName}: ${np}+${ds}`));
     cardLast4s.forEach(l4=>add(np+l4,`${person.fullName}: ${np}+${l4}`));
@@ -73,7 +89,7 @@ function generatePasswords(person, last4Hint) {
 
 // findPersonForCard is now defined inside extractHintsFromEmail block above
 
-function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, emailText) {
+function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, formatHint, emailText) {
   const results = [];
   const seen = new Set();
   const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)&&results.length<80){seen.add(pwd);results.push({pwd,label});} };
@@ -86,7 +102,7 @@ function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHin
 
   if (person) {
     const cardLast4 = last4Hint || person.cards?.find(c=>last2Hint&&c.last4?.endsWith(last2Hint))?.last4 || "";
-    const pwds = generatePasswords(person, cardLast4);
+    const pwds = generatePasswords(person, cardLast4, formatHint);
     console.log("[PwdResolve] generated passwords for matched person:", pwds.length, "first:", pwds[0]?.pwd);
     pwds.forEach(p=>addPwd(p.pwd,p.label));
   }
@@ -95,20 +111,20 @@ function resolvePasswords(vault, people, bankHint, last4Hint, last2Hint, nameHin
   if (results.length===0 && last4Hint) {
     const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
     console.log("[PwdResolve] last4 fallback matches:", matched.map(p=>p.fullName));
-    matched.forEach(p=>generatePasswords(p,last4Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
+    matched.forEach(p=>generatePasswords(p,last4Hint,formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
   // 3. If no person matched but we have last2, try people whose cards end with last2
   if (results.length===0 && last2Hint) {
     const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
     console.log("[PwdResolve] last2 fallback matches:", matched.map(p=>p.fullName));
-    matched.forEach(p=>generatePasswords(p,last2Hint).forEach(pw=>addPwd(pw.pwd,pw.label)));
+    matched.forEach(p=>generatePasswords(p,last2Hint,formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
   // 4. If STILL nothing — try ALL people (last resort, capped at 80)
   if (results.length===0 && people?.length>0) {
     console.log("[PwdResolve] No hints matched — trying all people as last resort");
-    (people||[]).forEach(p=>generatePasswords(p,last4Hint||last2Hint||"").forEach(pw=>addPwd(pw.pwd,pw.label)));
+    (people||[]).forEach(p=>generatePasswords(p,last4Hint||last2Hint||"",formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
   // 5. Manual vault passwords
@@ -195,7 +211,19 @@ function extractHintsFromEmail(subject, bodyText, toAddress) {
     if (text.includes(key)) { bankFound = val; break; }
   }
 
-  return { last4, last2, nameHint, emailNameHint, bank: bankFound };
+  // ── Password format hint from email body ─────────────────────────────────
+  // Banks sometimes explicitly say how the password is formed
+  let pwdFormatHint = null;
+  const bodyLower = (bodyText||"").toLowerCase();
+  if (bodyLower.includes("date of birth") && bodyLower.includes("ddmm")) pwdFormatHint = "ddmm";
+  else if (bodyLower.includes("date of birth") && bodyLower.includes("dd/mm")) pwdFormatHint = "ddmm";
+  else if (bodyLower.includes("date of birth") && bodyLower.includes("mmdd")) pwdFormatHint = "mmdd";
+  else if (bodyLower.includes("date of birth")) pwdFormatHint = "dob";
+  else if (bodyLower.includes("first 4") && bodyLower.includes("name") && bodyLower.includes("last 4")) pwdFormatHint = "name4+last4";
+  else if (bodyLower.includes("first 4") && bodyLower.includes("name") && bodyLower.includes("dob")) pwdFormatHint = "name4+dob";
+  else if (bodyLower.includes("first 4") && bodyLower.includes("name") && (bodyLower.includes("birth") || bodyLower.includes("ddmm"))) pwdFormatHint = "name4+dob";
+
+  return { last4, last2, nameHint, emailNameHint, bank: bankFound, pwdFormatHint };
 }
 
 // Match a person from registry using multiple signals
@@ -828,8 +856,8 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
             log(`   ↳ ⚠ No PDF attachment — skipping. (MIME types: ${bodyText.slice(0,50)})`, "warn");
             onProcessed(id);continue;
           }
-          const{last4:emailLast4,last2:emailLast2,nameHint:emailName,emailNameHint,bank:emailBank}=extractHintsFromEmail(subject,bodyText,toAddress);
-          log(`   ↳ Hints — Bank: ${emailBank||"?"} · Card: ${emailLast4?"••••"+emailLast4:emailLast2?"••"+emailLast2:"?"} · Name: ${emailName||"?"} · Email: ${emailNameHint||"?"}`);
+          const{last4:emailLast4,last2:emailLast2,nameHint:emailName,emailNameHint,bank:emailBank,pwdFormatHint}=extractHintsFromEmail(subject,bodyText,toAddress);
+          log(`   ↳ Hints — Bank: ${emailBank||"?"} · Card: ${emailLast4?"••••"+emailLast4:emailLast2?"••"+emailLast2:"?"} · Name: ${emailName||"?"} · Email: ${emailNameHint||"?"} · PwdFormat: ${pwdFormatHint||"unknown"}`);
           if(!emailLast4&&!emailLast2&&!emailName&&!emailNameHint) log(`   ↳ 📋 Body preview: "${(bodyText||"").slice(0,150).replace(/\n/g," ")}"`,"warn");
           for(const part of pdfParts){
             const fname=part.filename||"attachment.pdf";
@@ -852,7 +880,7 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
             const raw=atob(b64raw);const bytes=new Uint8Array(raw.length);
             for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
             log(`   ↳ PDF size: ${(bytes.length/1024).toFixed(1)} KB`);
-            const pwdList=resolvePasswords(vault,people||[],emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,subject+" "+bodyText);
+            const pwdList=resolvePasswords(vault,people||[],emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,pwdFormatHint,subject+" "+bodyText);
             log(`   ↳ 🔐 ${pwdList.length} passwords to try (matched by: ${emailLast4?"last4":emailLast2?"last2":emailName?"name":emailNameHint?"email-addr":"none"})`);
             if(pwdList.length>0) log(`   ↳ First 3: ${pwdList.slice(0,3).map(p=>p.pwd).join(", ")}`);
             let imgBase64=null;
@@ -1153,7 +1181,7 @@ export default function App(){
         let imgBase64;
         if(item.file.type==="application/pdf"){
           const bytes=new Uint8Array(await item.file.arrayBuffer());
-          const pwdList=resolvePasswords(vault,people,item.file.name,"","","","","");
+          const pwdList=resolvePasswords(vault,people,item.file.name,"","","","",null,"");
           try{const{imgBase64:img}=await tryPasswordsOnPDF(bytes,pwdList);imgBase64=img;}
           catch(e){
             if(e.message==="WRONG_PASSWORD"){
