@@ -117,7 +117,11 @@ async function getPDFLib() {
 
 async function pdfBytesToBase64Image(bytes, password="") {
   const pdfjsLib=await getPDFLib();
-  const loadingTask=pdfjsLib.getDocument({data:bytes,password});
+  // Copy the buffer so PDF.js doesn't detach the original (needed for password retries)
+  const dataCopy = bytes instanceof Uint8Array
+    ? new Uint8Array(bytes.buffer.slice(0))
+    : bytes.slice(0);
+  const loadingTask=pdfjsLib.getDocument({data:dataCopy,password});
   let pdf;
   try{pdf=await loadingTask.promise;}
   catch(err){if(err.name==="PasswordException")throw new Error("WRONG_PASSWORD");throw err;}
@@ -158,7 +162,14 @@ async function callGemini(apiKey,base64,mimeType="image/jpeg"){
 
 // ─── GMAIL ────────────────────────────────────────────────────────────────────
 async function gmailFetch(path,token){const res=await fetch(`https://gmail.googleapis.com/gmail/v1/${path}`,{headers:{Authorization:`Bearer ${token}`}});if(!res.ok)throw new Error(`Gmail API ${res.status}`);return res.json();}
-async function fetchStatementEmails(token){const q=encodeURIComponent('has:attachment filename:pdf (subject:statement OR subject:e-statement OR subject:"credit card" OR subject:"account statement")');const d=await gmailFetch(`users/me/messages?q=${q}&maxResults=50`,token);return d.messages||[];}
+async function fetchStatementEmails(token, afterDate=null){
+  // afterDate = "YYYY/MM/DD" Gmail format
+  const base = 'has:attachment filename:pdf (subject:statement OR subject:e-statement OR subject:"credit card" OR subject:"account statement" OR subject:bill OR subject:"due date" OR subject:outstanding)';
+  const dateFilter = afterDate ? ` after:${afterDate}` : "";
+  const q = encodeURIComponent(base + dateFilter);
+  const d = await gmailFetch(`users/me/messages?q=${q}&maxResults=100`, token);
+  return d.messages||[];
+}
 async function fetchEmailWithAttachments(messageId,token){
   const msg=await gmailFetch(`users/me/messages/${messageId}?format=full`,token);
   const hdr=(name)=>msg.payload?.headers?.find(h=>h.name===name)?.value||"";
@@ -578,6 +589,8 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
   const[syncing,setSyncing]=useState(false);
   const[syncLog,setSyncLog]=useState([]);
   const[pwdRequest,setPwdRequest]=useState(null);
+  const[lastSyncDate,setLastSyncDate]=useState(()=>ls.get("cc_last_sync_date",null));
+  const[syncDays,setSyncDays]=useState(30); // days to look back on first sync
 
   const log=(msg,type="info")=>setSyncLog(prev=>[...prev.slice(-40),{msg,type,t:new Date().toLocaleTimeString()}]);
 
@@ -599,55 +612,119 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
   const runSync=async()=>{
     if(!gmailToken)return;
     setSyncing(true);setSyncLog([]);
+
+    // Calculate date filter
+    // If we have a lastSyncDate, use that. Otherwise look back syncDays days.
+    let afterDate;
+    if(lastSyncDate){
+      afterDate=lastSyncDate;
+      log(`📅 Fetching emails since last sync: ${lastSyncDate}`);
+    } else {
+      const d=new Date();d.setDate(d.getDate()-syncDays);
+      afterDate=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+      log(`📅 First sync — fetching last ${syncDays} days (since ${afterDate})`);
+    }
+
     log("🔍 Searching Gmail for CC statement emails…");
     try{
-      const messages=await fetchStatementEmails(gmailToken);
+      const messages=await fetchStatementEmails(gmailToken,afterDate);
+      log(`Total matching emails in date range: ${messages.length}`);
+      log(`Already processed: ${processedIds.length} · Remaining: ${messages.filter(m=>!processedIds.includes(m.id)).length}`);
       const fresh=messages.filter(m=>!processedIds.includes(m.id));
-      log(`Found ${messages.length} emails · ${fresh.length} new`);
-      if(fresh.length===0){log("✅ All caught up!","success");setSyncing(false);return;}
+      if(fresh.length===0){
+        log("✅ All caught up — no new emails in this date range.","success");
+        log("💡 Tip: Use 🔄 Re-scan or adjust the date range below if needed.","warn");
+        setSyncing(false);return;
+      }
       const newRecords=[];
       for(const{id}of fresh){
         try{
           const{subject,date,pdfParts,bodyText}=await fetchEmailWithAttachments(id,gmailToken);
-          log(`📧 "${subject}"`);
-          if(pdfParts.length===0){log("  ↳ No PDF, skipping.","warn");onProcessed(id);continue;}
+          log(`📧 Subject: "${subject}"`);
+          log(`   Date: ${date} · PDF attachments found: ${pdfParts.length}`);
+          if(pdfParts.length===0){
+            log(`   ↳ ⚠ No PDF attachment — skipping. (MIME types: ${bodyText.slice(0,50)})`, "warn");
+            onProcessed(id);continue;
+          }
           const{last4:emailLast4,bank:emailBank}=extractHintsFromEmail(subject,bodyText);
-          if(emailLast4)log(`  ↳ Detected card ••••${emailLast4}`);
+          log(`   ↳ Hints — Bank: ${emailBank||"not detected"} · Card: ${emailLast4?"••••"+emailLast4:"not detected"}`);
           for(const part of pdfParts){
             const fname=part.filename||"attachment.pdf";
-            log(`  ↳ 📄 ${fname}`);
+            const hasAttachId=!!part.body?.attachmentId;
+            const hasInlineData=!!part.body?.data;
+            log(`   ↳ 📄 ${fname} (attachmentId: ${hasAttachId}, inlineData: ${hasInlineData}, size: ${part.body?.size||"?"})`);
             let b64raw;
-            if(part.body?.attachmentId){b64raw=await downloadAttachment(id,part.body.attachmentId,gmailToken);}
-            else if(part.body?.data){b64raw=part.body.data.replace(/-/g,"+").replace(/_/g,"/");}
-            else{log(`  ↳ Cannot download ${fname}`,"error");continue;}
+            if(hasAttachId){
+              log(`   ↳ Downloading attachment...`);
+              b64raw=await downloadAttachment(id,part.body.attachmentId,gmailToken);
+              log(`   ↳ Downloaded: ${b64raw?.length||0} chars`);
+            } else if(hasInlineData){
+              b64raw=part.body.data.replace(/-/g,"+").replace(/_/g,"/");
+              log(`   ↳ Inline data: ${b64raw?.length||0} chars`);
+            } else{
+              log(`   ↳ ❌ Cannot get PDF data — no attachmentId or inline data`,"error");
+              continue;
+            }
+            if(!b64raw||b64raw.length<100){log(`   ↳ ❌ PDF data too small or empty (${b64raw?.length} chars)`,"error");continue;}
             const raw=atob(b64raw);const bytes=new Uint8Array(raw.length);
             for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+            log(`   ↳ PDF size: ${(bytes.length/1024).toFixed(1)} KB`);
             const pwdList=resolvePasswords(vault,people||[],emailBank||subject,emailLast4,subject+" "+bodyText);
-            if(pwdList.length>0)log(`  ↳ 🔐 Trying ${pwdList.length} vault password(s)…`);
+            log(`   ↳ 🔐 ${pwdList.length} passwords to try (${people.length} people in registry, ${vault.length} in vault)`);
+            if(pwdList.length>0) log(`   ↳ First 3: ${pwdList.slice(0,3).map(p=>p.pwd).join(", ")}`);
             let imgBase64=null;
-            try{const{imgBase64:img,usedLabel}=await tryPasswordsOnPDF(bytes,pwdList);imgBase64=img;if(usedLabel!=="no password")log(`  ↳ ✓ Unlocked: ${usedLabel}`);}
-            catch(e){
+            try{
+              const{imgBase64:img,usedLabel}=await tryPasswordsOnPDF(bytes,pwdList);
+              imgBase64=img;
+              log(`   ↳ ✓ PDF opened: ${usedLabel}`,"success");
+            }catch(e){
               if(e.message==="WRONG_PASSWORD"){
-                log(`  ↳ 🔒 All vault passwords failed`,"warn");
-                let manualPwd;try{manualPwd=await askPassword(fname,emailBank?.toUpperCase()||"");}catch{log(`  ↳ Skipped`,"warn");continue;}
+                log(`   ↳ 🔒 All ${pwdList.length} passwords failed — asking manually`,"warn");
+                let manualPwd;
+                try{manualPwd=await askPassword(fname,emailBank?.toUpperCase()||subject.slice(0,30));}
+                catch{log(`   ↳ Skipped by user`,"warn");continue;}
                 setPwdRequest(null);
-                try{imgBase64=await pdfBytesToBase64Image(bytes,manualPwd);}catch(e2){log(`  ↳ Wrong password`,"error");continue;}
-              }else throw e;
+                try{imgBase64=await pdfBytesToBase64Image(bytes,manualPwd);log(`   ↳ ✓ Opened with manual password`,"success");}
+                catch(e2){log(`   ↳ ❌ Wrong manual password too`,"error");continue;}
+              }else{
+                log(`   ↳ ❌ PDF error: ${e.message}`,"error");continue;
+              }
             }
-            log(`  ↳ 🤖 Extracting with Gemini…`);
-            const result=await callGemini(settings.geminiKey,imgBase64);
-            result.fileName=fname;result.receivedOn=new Date(date).toLocaleDateString("en-GB");result.source="gmail";result.paid=false;result.id=`gmail-${id}-${fname}`;
-            newRecords.push(result);
-            log(`  ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due ${result.dueAmount||"?"}`,"success");
+            log(`   ↳ 🤖 Sending to Gemini for extraction...`);
+            try{
+              const result=await callGemini(settings.geminiKey,imgBase64);
+              result.fileName=fname;result.receivedOn=new Date(date).toLocaleDateString("en-GB");
+              result.source="gmail";result.paid=false;result.id=`gmail-${id}-${fname}`;
+              newRecords.push(result);
+              log(`   ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due: ${result.dueAmount||"?"} ${result.currency||""}`,"success");
+            }catch(geminiErr){
+              log(`   ↳ ❌ Gemini error: ${geminiErr.message}`,"error");
+            }
           }
           onProcessed(id);
-        }catch(err){log(`  ↳ Error: ${err.message}`,"error");onProcessed(id);}
+        }catch(err){
+          log(`❌ Error processing email: ${err.message}`,"error");
+          log(`   Stack: ${err.stack?.split('
+')[1]||""}`,"error");
+          onProcessed(id);
+        }
       }
-      if(newRecords.length>0){await onNewRecords(newRecords);log(`🎉 Added ${newRecords.length} statement(s)!`,"success");}
-      else log("No new data extracted.","warn");
+      if(newRecords.length>0){
+        await onNewRecords(newRecords);
+        log(`🎉 Successfully added ${newRecords.length} statement(s) to tracker!`,"success");
+      } else {
+        log("⚠ No new data extracted. Check logs above for details.","warn");
+        log("💡 Common causes: all emails already processed, PDFs blocked, wrong passwords","warn");
+      }
+      // Save today as last sync date so next sync only reads new emails
+      const today=new Date();
+      const todayStr=`${today.getFullYear()}/${String(today.getMonth()+1).padStart(2,"0")}/${String(today.getDate()).padStart(2,"0")}`;
+      setLastSyncDate(todayStr);
+      ls.set("cc_last_sync_date",todayStr);
+      log(`📅 Last sync date saved: ${todayStr}`);
     }catch(err){
-      if(err.message.includes("401")){log("Session expired. Please sign in again.","error");signOut();}
-      else log(`Sync error: ${err.message}`,"error");
+      if(err.message.includes("401")){log("❌ Gmail session expired. Please sign in again.","error");signOut();}
+      else log(`❌ Sync error: ${err.message}`,"error");
     }
     setSyncing(false);
   };
@@ -669,9 +746,32 @@ function GmailSyncPanel({settings,vault,people,uid,onNewRecords,processedIds,onP
             <div style={{background:"#052e16",border:"1px solid #14532d",borderRadius:8,padding:"8px 14px",fontSize:12,color:"#4ade80"}}>✓ {gmailEmail||"Gmail connected"}</div>
             <button onClick={signOut} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",borderRadius:7,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>Disconnect</button>
           </div>
-          <button onClick={runSync} disabled={syncing} style={{...S.btn(syncing?"#1e293b":"#1d4ed8",syncing),marginBottom:16,display:"flex",alignItems:"center",gap:8}}>
-            {syncing?"⟳ Syncing Gmail…":"⚡ Sync Gmail Now"}
-          </button>
+          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+            <button onClick={runSync} disabled={syncing} style={{...S.btn(syncing?"#1e293b":"#1d4ed8",syncing),display:"flex",alignItems:"center",gap:8}}>
+              {syncing?"⟳ Syncing Gmail…":"⚡ Sync Gmail Now"}
+            </button>
+            <button onClick={()=>{setProcessedIds([]);log("🔄 Reset — will re-scan emails in current date range","success");}} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
+              🔄 Re-scan
+            </button>
+          </div>
+          {/* Date range controls */}
+          <div style={{...S.card,padding:"12px 14px",marginBottom:16,fontSize:11}}>
+            <div style={{color:"#60a5fa",fontWeight:600,marginBottom:8,fontSize:10,letterSpacing:"0.06em"}}>📅 DATE RANGE</div>
+            {lastSyncDate?(
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <span style={{color:"#475569"}}>Reading emails since: <strong style={{color:"#94a3b8"}}>{lastSyncDate}</strong></span>
+                <button onClick={()=>{setLastSyncDate(null);ls.del("cc_last_sync_date");log("📅 Date reset — will use days setting below","success");}} style={{background:"none",border:"1px solid #334155",color:"#475569",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10}}>Reset date</button>
+              </div>
+            ):(
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{color:"#475569"}}>First sync — look back:</span>
+                {[15,30,60,90].map(d=>(
+                  <button key={d} onClick={()=>setSyncDays(d)} style={{background:syncDays===d?"#1e40af":"none",border:`1px solid ${syncDays===d?"#3b82f6":"#1e293b"}`,color:syncDays===d?"#fff":"#475569",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10}}>{d} days</button>
+                ))}
+              </div>
+            )}
+            <div style={{color:"#1e3a5f",fontSize:10,marginTop:6}}>After each sync, only new emails are read — old ones are never re-processed</div>
+          </div>
           {syncLog.length>0&&(
             <div style={{background:"#050810",border:"1px solid #0f172a",borderRadius:8,padding:"12px 14px",maxHeight:240,overflowY:"auto",fontFamily:"'DM Mono',monospace",fontSize:11}}>
               {syncLog.map((l,i)=><div key={i} style={{color:l.type==="error"?"#f87171":l.type==="success"?"#4ade80":l.type==="warn"?"#fb923c":"#475569",lineHeight:1.9}}><span style={{color:"#1e293b",marginRight:8}}>{l.t}</span>{l.msg}</div>)}
