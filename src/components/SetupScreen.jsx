@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { initFirebase } from "../firebase";
 import { S } from "./Panels";
 
 const AI_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
