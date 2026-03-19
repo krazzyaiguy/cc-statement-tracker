@@ -138,7 +138,7 @@ export const DEFAULT_BANK_RULES = [
 
 // findPersonForCard is now defined inside extractHintsFromEmail block above
 
-export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, formatHint, emailText) {
+export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, last2Hint, nameHint, emailNameHint, formatHint, emailText, cardPrefix) {
   const results = [];
   const seen = new Set();
   const addPwd = (pwd,label) => { if(pwd&&!seen.has(pwd)&&results.length<80){seen.add(pwd);results.push({pwd,label});} };
@@ -150,8 +150,28 @@ export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, 
   const matchedRule = (bankRules||[]).find(r=>bankKey.includes(r.bankName.toLowerCase())||r.bankName.toLowerCase().includes(bankKey.split(" ")[0]));
   if (matchedRule && matchedRule.formula !== "custom") {
     console.log("[PwdResolve] Using bank rule:", matchedRule.bankName, matchedRule.formula);
-    const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText);
-    const targetPeople = person ? [person] : (people||[]);
+    // Find all people who have this card — generate passwords for each individually
+    // This prevents mixing one person's name with another person's DOB
+    let targetPeople = [];
+    if (last4Hint) {
+      const allMatched = (people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
+      if (allMatched.length > 1 && emailNameHint) {
+        // Multiple matches — try email hint to sort by priority (best match first)
+        const hint = emailNameHint.toUpperCase();
+        allMatched.sort((a,b)=>{
+          const aWords = (a.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
+          const bWords = (b.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
+          const aMatch = aWords.some(w=>w.length>=3&&(w.startsWith(hint)||hint.startsWith(w.slice(0,3))));
+          const bMatch = bWords.some(w=>w.length>=3&&(w.startsWith(hint)||hint.startsWith(w.slice(0,3))));
+          return bMatch - aMatch; // best match first
+        });
+      }
+      targetPeople = allMatched.length > 0 ? allMatched : [];
+    }
+    if (targetPeople.length === 0) {
+      const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText, cardPrefix);
+      targetPeople = person ? [person] : (people||[]);
+    }
     const cardHint = last4Hint || last2Hint || "";
     targetPeople.forEach(p => {
       const pwds = generateByFormula(matchedRule.formula, p, cardHint);
@@ -188,34 +208,45 @@ export function resolvePasswords(vault, people, bankRules, bankHint, last4Hint, 
     return results;
   }
 
-  // 1. Find best matching person using all available hints
-  const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText);
-  console.log("[PwdResolve] matched person:", person?.fullName||"none");
-
-  if (person) {
-    const cardLast4 = last4Hint || person.cards?.find(c=>last2Hint&&c.last4?.endsWith(last2Hint))?.last4 || "";
-    const pwds = generatePasswords(person, cardLast4, formatHint);
-    console.log("[PwdResolve] generated passwords for matched person:", pwds.length, "first:", pwds[0]?.pwd);
-    pwds.forEach(p=>addPwd(p.pwd,p.label));
+  // 1. Find ALL people who have this card — try each person's own name+DOB
+  // IMPORTANT: never mix person A's name with person B's DOB
+  if (last4Hint) {
+    const allMatched = (people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
+    if (allMatched.length > 0) {
+      // Sort: email name hint match goes first
+      if (emailNameHint && allMatched.length > 1) {
+        const hint = emailNameHint.toUpperCase();
+        allMatched.sort((a,b)=>{
+          const aW = (a.fullName||"").toUpperCase().split(" ");
+          const bW = (b.fullName||"").toUpperCase().split(" ");
+          const aM = aW.some(w=>w.length>=3&&(w.startsWith(hint)||hint.startsWith(w.slice(0,3))));
+          const bM = bW.some(w=>w.length>=3&&(w.startsWith(hint)||hint.startsWith(w.slice(0,3))));
+          return bM - aM;
+        });
+      }
+      console.log("[PwdResolve] last4 matched people:", allMatched.map(p=>p.fullName));
+      // Each person generates passwords using ONLY their own name and DOB
+      allMatched.forEach(p=>generatePasswords(p, last4Hint, formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
+    }
   }
 
-  // 2. If no person matched but we have last4, try people whose cards match
-  if (results.length===0 && last4Hint) {
-    const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
-    console.log("[PwdResolve] last4 fallback matches:", matched.map(p=>p.fullName));
-    matched.forEach(p=>generatePasswords(p,last4Hint,formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
-  }
-
-  // 3. If no person matched but we have last2, try people whose cards end with last2
+  // 2. last2 fallback
   if (results.length===0 && last2Hint) {
     const matched=(people||[]).filter(p=>p.cards?.some(c=>c.last4?.endsWith(last2Hint)));
-    console.log("[PwdResolve] last2 fallback matches:", matched.map(p=>p.fullName));
     matched.forEach(p=>generatePasswords(p,last2Hint,formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
-  // 4. If STILL nothing — try ALL people (last resort, capped at 80)
+  // 3. Name-based match fallback
+  if (results.length===0) {
+    const person = findPersonForCard(people||[], last4Hint, last2Hint, nameHint, emailNameHint, emailText, cardPrefix);
+    if (person) {
+      const cardLast4 = last4Hint || person.cards?.find(c=>last2Hint&&c.last4?.endsWith(last2Hint))?.last4 || "";
+      generatePasswords(person, cardLast4, formatHint).forEach(p=>addPwd(p.pwd,p.label));
+    }
+  }
+
+  // 4. Last resort — try all people
   if (results.length===0 && people?.length>0) {
-    console.log("[PwdResolve] No hints matched — trying all people as last resort");
     (people||[]).forEach(p=>generatePasswords(p,last4Hint||last2Hint||"",formatHint).forEach(pw=>addPwd(pw.pwd,pw.label)));
   }
 
@@ -339,14 +370,41 @@ export function extractHintsFromEmail(subject, bodyText, toAddress) {
 }
 
 // Match a person from registry using multiple signals
-export function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailNameHint, emailText) {
+export function findPersonForCard(people, last4Hint, last2Hint, nameHint, emailNameHint, emailText, cardPrefix) {
   if (!people||!people.length) return null;
   const text = (emailText||"").toLowerCase();
 
-  // Priority 1: exact last4 card match
-  if (last4Hint) {
+  // Priority 1: last4 + card prefix match (most specific — handles duplicate last4)
+  if (last4Hint && cardPrefix) {
     for (const p of people) {
-      if (p.cards?.some(c=>c.last4===last4Hint)) return p;
+      if (p.cards?.some(c=>c.last4===last4Hint && c.prefix && c.prefix===cardPrefix)) return p;
+    }
+  }
+
+  // Priority 2: exact last4 card match (single match only — avoid wrong person if duplicate)
+  if (last4Hint) {
+    const matched = (people||[]).filter(p=>p.cards?.some(c=>c.last4===last4Hint));
+    if (matched.length===1) return matched[0]; // unambiguous
+    if (matched.length>1) {
+      // Multiple people share this last4 — try to disambiguate by email name hint
+      if (emailNameHint) {
+        const hint = emailNameHint.toUpperCase();
+        const byName = matched.find(p=>{
+          const words = (p.fullName||"").toUpperCase().replace(/[^A-Z ]/g,"").split(" ");
+          return words.some(w=>w.length>=4&&(w.startsWith(hint)||hint.startsWith(w.slice(0,4))));
+        });
+        if (byName) return byName;
+      }
+      if (nameHint) {
+        const byName = matched.find(p=>{
+          const words = (p.fullName||"").toLowerCase().split(" ");
+          return words.some(w=>w.length>2&&nameHint.toLowerCase().includes(w));
+        });
+        if (byName) return byName;
+      }
+      // Still ambiguous — return first match but log warning
+      console.warn("[findPerson] Duplicate last4:", last4Hint, "matched:", matched.map(p=>p.fullName));
+      return matched[0];
     }
   }
 
