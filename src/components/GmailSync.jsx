@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { ls } from "../utils/storage";
 import { resolvePasswords, extractHintsFromEmail } from "../utils/passwords";
 import { pdfBytesToBase64Image, tryPasswordsOnPDF, callGroq, fetchStatementEmails, fetchEmailWithAttachments, downloadAttachment } from "../utils/pdfGroqGmail";
