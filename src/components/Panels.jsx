@@ -68,10 +68,7 @@ export function VaultPanel({vault,uid,onAdd,onUpdate,onDelete}){
         <div style={{color:"#60a5fa",fontSize:11,fontWeight:600,marginBottom:12,letterSpacing:"0.05em"}}>+ ADD VAULT ENTRY</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
           <div><label style={S.label}>Bank Name *</label><input value={bankName} onChange={e=>setBankName(e.target.value)} placeholder="e.g. HDFC" style={S.input}/></div>
-          <div style={{display:"flex",gap:8}}>
-            <div style={{flex:1}}><label style={S.label}>Card Last 4 Digits</label><input value={last4} onChange={e=>setLast4(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="e.g. 1234" maxLength={4} style={{...S.input,letterSpacing:"0.2em"}}/></div>
-            <div style={{width:90}}><label style={S.label}>First 4 (optional)</label><input value={cardPrefix||""} onChange={e=>setCardPrefix(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="4315" maxLength={4} style={{...S.input,letterSpacing:"0.2em",fontSize:11}} title="First 4 digits of card — helps when two people share same last 4"/></div>
-          </div>
+          <div><label style={S.label}>Card Last 4 Digits</label><input value={last4} onChange={e=>setLast4(e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="e.g. 1234" maxLength={4} style={{...S.input,letterSpacing:"0.2em"}}/></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
           <div><label style={S.label}>Cardholder Name</label><input value={cardHolder} onChange={e=>setCardHolder(e.target.value)} placeholder="Optional" style={S.input}/></div>
