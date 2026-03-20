@@ -11,7 +11,7 @@ import {
   loadMeta, saveMeta,
 } from "./firebase";
 import { SetupScreen } from "./components/SetupScreen";
-import { S, Badge, PasswordModal, VaultPanel, PeoplePanel, BankRulesPanel, SettingsPanel } from "./components/Panels";
+import { S, Badge, PasswordModal, VaultPanel, PeoplePanel, BankRulesPanel, SettingsPanel, ITRPanel } from "./components/Panels";
 import { GmailSyncPanel } from "./components/GmailSync";
 import { DEFAULT_BANK_RULES } from "./utils/passwords";
 
@@ -26,6 +26,7 @@ export default function App(){
   const[records,setRecords]     = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_records_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[vault,setVault]         = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[bankRules,setBankRules]   = useState(()=>{ try{const v=JSON.parse(localStorage.getItem(BANK_RULES_KEY)||'null');return Array.isArray(v)?v:DEFAULT_BANK_RULES;}catch{return DEFAULT_BANK_RULES;} });
+  const[itrData,setItrData]       = useState(()=>{ try{return JSON.parse(localStorage.getItem('cc_itr_v1')||'{}');}catch{return {};} });
   const[people,setPeople]       = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[processedIds,setProcessedIds] = useState([]);
   const[files,setFiles]         = useState([]);
@@ -210,6 +211,7 @@ export default function App(){
   const handleDeleteRecord=(r)=>setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
   const handlePartialPayment=(r,amt)=>{
     const paid=parseFloat(amt)||0;
+    if(!paid) return;
     const remaining=Math.max(0,((r.originalAmount??r.dueAmount)||0)-paid);
     setRecords(prev=>prev.map(rec=>rec.id===r.id?{
       ...rec,
@@ -218,6 +220,22 @@ export default function App(){
       dueAmount:Math.round(remaining*100)/100,
       paid:remaining<=0
     }:rec));
+    // Auto-capture to ITR tracker (per person per bank)
+    const person = (r.cardholderName||"Unknown").trim().toUpperCase();
+    const bank   = (r.bankName||"Unknown").trim().toUpperCase();
+    const today  = new Date().toISOString().slice(0,10);
+    const now    = new Date();
+    const fyStart = now.getMonth()>=3 ? now.getFullYear() : now.getFullYear()-1;
+    const fy     = `${fyStart}-${fyStart+1}`;
+    setItrData(prev=>{
+      const d = JSON.parse(JSON.stringify(prev));
+      if(!d[fy]) d[fy]={};
+      if(!d[fy][person]) d[fy][person]={};
+      if(!d[fy][person][bank]) d[fy][person][bank]={payments:[]};
+      d[fy][person][bank].payments.push({amount:paid,date:today,card:r.lastFourDigits||"",addedAt:new Date().toISOString()});
+      try{localStorage.setItem('cc_itr_v1',JSON.stringify(d));}catch{}
+      return d;
+    });
   };
 
 
@@ -266,7 +284,7 @@ export default function App(){
   const unpaidRecs=records.filter(r=>!r.paid);
   const unpaidTotal=unpaidRecs.reduce((s,r)=>s+(r.dueAmount||0),0);
   const currency=records.find(r=>r.currency)?.currency||"";
-  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["settings","⚙ Settings"]];
+  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["settings","⚙ Settings"]];
 
   return(
     <div style={{minHeight:"100vh",background:"#080c14",paddingBottom:48}}>
@@ -410,6 +428,8 @@ export default function App(){
         {activeTab==="vault"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Password Vault</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Passwords matched by bank + card number. Auto-used during sync.</p><VaultPanel vault={vault} uid={user?.uid} onAdd={handleAddVault} onUpdate={handleUpdateVault} onDelete={handleDeleteVault}/></div>}
 
         {/* Settings */}
+        {activeTab==="itr"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>💰 ITR Repayment Tracker</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Track credit card repayments per person per bank. Banks report ≥₹10L to IT dept.</p><ITRPanel itrData={itrData} setItrData={setItrData}/></div>}
+
         {activeTab==="bankrules"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>🏦 Bank Password Rules</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Define exact password formula per bank. App tries only these — no more 80-attempt guessing.</p><BankRulesPanel rules={bankRules} onUpdate={setBankRules}/></div>}
 
         {activeTab==="settings"&&<div style={{...S.card,padding:"24px"}}>
