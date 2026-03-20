@@ -11,14 +11,18 @@ Return ONLY valid JSON, no markdown, no explanation:
   "statementDate": "DD/MM/YYYY or null",
   "dueDate": "DD/MM/YYYY or null",
   "dueAmount": number or null,
-  "currency": "INR or null"
+  "currency": "INR or null",
+  "paymentsReceived": number or null,
+  "accumulatedSpends": number or null
 }
 STRICT RULES:
 - cardholderName: Full name as printed on statement. Remove prefixes like MR, MRS, MS. e.g. "RAVI SHARMA" not "MR RAVI SHARMA"
 - lastFourDigits: ONLY the last 4 numeric digits of the card. If card shows "XXXX XXXX XXXX 1234" return "1234". Never return X or * characters.
-- dueAmount: The TOTAL AMOUNT DUE as a plain number in rupees. If shown in paise divide by 100. e.g. 5481.00 not 548100
+- dueAmount: The TOTAL AMOUNT DUE / TOTAL OUTSTANDING as a plain number in rupees. e.g. 18243.00
 - dueDate: Payment due date in DD/MM/YYYY format
 - statementDate: Statement generation date in DD/MM/YYYY format
+- paymentsReceived: Look for "Payments, Reversals & other Credits" or "Payment Received" or "Credits" in Account Summary. This is what the customer PAID last month. e.g. 1013.00
+- accumulatedSpends: Look for "Accumulated Spends till statement date" or "Total Spends" or "Year to date spends". e.g. 40845.00
 - Return null for any field you cannot find with confidence`;
 
 // ─── PDF ──────────────────────────────────────────────────────────────────────
