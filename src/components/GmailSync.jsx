@@ -85,6 +85,8 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
           if(!emailLast4&&!emailLast2&&!emailName&&!emailNameHint) log(`   ↳ 📋 Body preview: "${(bodyText||"").slice(0,150).replace(/\n/g," ")}"`,"warn");
           for(const part of pdfParts){
             const fname=part.filename||"attachment.pdf";
+            // Extract card prefix from filename e.g. "4315XXXXXXXX2004_..." → "4315"
+            const fnamePrefix = fname.match(/^(\d{4})[Xx*]+\d{4}/)?.[1]||null;
             const hasAttachId=!!part.body?.attachmentId;
             const hasInlineData=!!part.body?.data;
             log(`   ↳ 📄 ${fname} (attachmentId: ${hasAttachId}, inlineData: ${hasInlineData}, size: ${part.body?.size||"?"})`);
@@ -104,7 +106,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
             const raw=atob(b64raw);const bytes=new Uint8Array(raw.length);
             for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
             log(`   ↳ PDF size: ${(bytes.length/1024).toFixed(1)} KB`);
-            const pwdList=resolvePasswords(vault,people||[],bankRules,emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,pwdFormatHint,subject+" "+bodyText);
+            const pwdList=resolvePasswords(vault,people||[],bankRules,emailBank||subject,emailLast4,emailLast2,emailName,emailNameHint,pwdFormatHint,subject+" "+bodyText,fnamePrefix);
             log(`   ↳ 🔐 ${pwdList.length} passwords to try (matched by: ${emailLast4?"last4":emailLast2?"last2":emailName?"name":emailNameHint?"email-addr":"none"})`);
             if(pwdList.length>0) log(`   ↳ First 3: ${pwdList.slice(0,3).map(p=>p.pwd).join(", ")}`);
             let imgBase64=null;
@@ -128,6 +130,31 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
             log(`   ↳ 🤖 Sending to Groq for extraction...`);
             try{
               const result=await callGroq(settings.geminiKey,imgBase64);
+
+              // ── Post-process and clean extracted data ──────────────────────
+              // Fix lastFourDigits — remove any X, x, * characters, keep only digits
+              if(result.lastFourDigits){
+                const digits = (result.lastFourDigits+"").replace(/[^0-9]/g,"");
+                result.lastFourDigits = digits.length>=4 ? digits.slice(-4) : (digits||null);
+              }
+              // Use email-detected last4 if Groq returned garbage
+              if(!result.lastFourDigits && emailLast4) result.lastFourDigits = emailLast4;
+
+              // Fix cardholderName — remove MR/MRS/MS prefix, fix reversed names
+              if(result.cardholderName){
+                result.cardholderName = result.cardholderName
+                  .replace(/^(MR\.?\s+|MRS\.?\s+|MS\.?\s+|DR\.?\s+)/i,"")
+                  .trim();
+              }
+
+              // Fix dueAmount — if suspiciously large (>1 crore) might be in paise
+              if(result.dueAmount && result.dueAmount > 1000000){
+                result.dueAmount = Math.round(result.dueAmount / 100 * 100) / 100;
+              }
+
+              // Fix bankName — use email-detected bank if Groq missed it
+              if(!result.bankName && emailBank) result.bankName = emailBank.toUpperCase();
+
               result.fileName=fname;result.receivedOn=new Date(date).toLocaleDateString("en-GB");
               result.source="gmail";result.paid=false;result.id=`gmail-${id}-${fname}`;
               newRecords.push(result);
