@@ -220,6 +220,10 @@ export default function App(){
           }
         }else{imgBase64=await fileToBase64(item.file);}
         const result=await callGroq(settings.geminiKey,imgBase64,item.file.type==="application/pdf"?"image/jpeg":item.file.type);
+        // Clean extracted data
+        if(result.lastFourDigits){ const d=(result.lastFourDigits+"").replace(/[^0-9]/g,""); result.lastFourDigits=d.length>=4?d.slice(-4):(d||null); }
+        if(result.cardholderName) result.cardholderName=result.cardholderName.replace(/^(MR\.?\s+|MRS\.?\s+|MS\.?\s+|DR\.?\s+)/i,"").trim();
+        if(result.dueAmount&&result.dueAmount>1000000) result.dueAmount=Math.round(result.dueAmount/100*100)/100;
         result.fileName=item.file.name;result.receivedOn=new Date().toLocaleDateString("en-GB");result.source="manual";result.paid=false;result.id=item.id;
         setFiles(prev=>prev.map(f=>f.id===item.id?{...f,status:"done",result}:f));
         setRecords(prev=>{const ex=prev.find(r=>r.id===item.id);return ex?prev.map(r=>r.id===item.id?result:r):[...prev,result];});
