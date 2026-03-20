@@ -156,6 +156,7 @@ export default function App(){
   },[user,processedIds]); // eslint-disable-line
 
   const handleSaveKey=(s)=>{ setSettings(s); ls.set(SETTINGS_KEY,s); };
+  const handleRetentionChange=(days)=>{ const s={...settings,retentionDays:days}; setSettings(s); ls.set(SETTINGS_KEY,s); };
 
   // Hooks before early returns
   const handleNewRecords=useCallback((newRecs)=>{
@@ -189,8 +190,39 @@ export default function App(){
   const handleUpdatePerson =(fid,data)=>setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p));
   const handleDeletePerson =(fid)=>setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid));
 
-  const handleTogglePaid=(r)=>setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,paid:!rec.paid}:rec));
+  const handleTogglePaid=(r)=>setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,paid:!rec.paid,paidAmount:!rec.paid?rec.dueAmount:0}:rec));
   const handleDeleteRecord=(r)=>setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
+  const handlePartialPayment=(r,amt)=>{
+    const paid=parseFloat(amt)||0;
+    const remaining=Math.max(0,((r.originalAmount??r.dueAmount)||0)-paid);
+    setRecords(prev=>prev.map(rec=>rec.id===r.id?{
+      ...rec,
+      paidAmount:(rec.paidAmount||0)+paid,
+      originalAmount:rec.originalAmount??rec.dueAmount,
+      dueAmount:Math.round(remaining*100)/100,
+      paid:remaining<=0
+    }:rec));
+  };
+
+  // Auto-delete records older than retention days (runs on load)
+  const retentionDays = settings?.retentionDays || 60;
+  useEffect(()=>{
+    if(!records.length) return;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate()-retentionDays);
+    const fresh = records.filter(r=>{
+      if(!r.receivedOn) return true;
+      // Parse DD/MM/YYYY
+      const parts = r.receivedOn.split("/");
+      if(parts.length!==3) return true;
+      const d = new Date(parts[2],parts[1]-1,parts[0]);
+      return d >= cutoff;
+    });
+    if(fresh.length < records.length){
+      console.log(`Auto-deleted ${records.length-fresh.length} records older than ${retentionDays} days`);
+      setRecords(fresh);
+    }
+  },[retentionDays]); // eslint-disable-line
 
   // Manual upload
   const addFiles=(newFiles)=>{
@@ -339,10 +371,16 @@ export default function App(){
               <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12,gap:10,flexWrap:"wrap"}}>
                 <button className="abtn" onClick={()=>exportToExcel(records)} style={S.btn("#15803d")}>⬇ Export Excel</button>
                 <button className="abtn" onClick={()=>{if(window.confirm("Clear ALL records?")) setRecords([]);}} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>🗑 Clear All</button>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:"auto"}}>
+                  <span style={{color:"#334155",fontSize:10}}>Auto-delete after:</span>
+                  {[30,60,90,180].map(d=>(
+                    <button key={d} onClick={()=>handleRetentionChange(d)} style={{background:(settings?.retentionDays||60)===d?"#1e3a5f":"none",border:`1px solid ${(settings?.retentionDays||60)===d?"#3b82f6":"#1e293b"}`,color:(settings?.retentionDays||60)===d?"#60a5fa":"#334155",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10}}>{d}d</button>
+                  ))}
+                </div>
               </div>
               <div className="tbl-sc" style={{border:"1px solid #1e293b",borderRadius:10}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:640}}>
-                  <thead><tr style={{background:"#0d1424"}}>{["#","Cardholder","Bank","Card","Due Date","Amount","Src","Status",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:"#334155",fontWeight:500,fontSize:9,letterSpacing:"0.06em",textTransform:"uppercase",borderBottom:"1px solid #1e293b",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                  <thead><tr style={{background:"#0d1424"}}>{["#","Cardholder","Bank","Card","Due Date","Amount","Paid","Balance","Src","Status",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:"#334155",fontWeight:500,fontSize:9,letterSpacing:"0.06em",textTransform:"uppercase",borderBottom:"1px solid #1e293b",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
                   <tbody>
                     {records.map((r,i)=>(
                       <tr key={r.firestoreId||r.id} className="row-h" style={{background:r.paid?"#071a0f":"#0a0e1a",opacity:r.paid?.6:1}}>
