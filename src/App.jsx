@@ -13,6 +13,7 @@ import {
 import { SetupScreen } from "./components/SetupScreen";
 import { S, Badge, PasswordModal, VaultPanel, PeoplePanel, BankRulesPanel, SettingsPanel } from "./components/Panels";
 import { ITRPanel } from "./components/ITRPanel";
+import { MilestonePanel } from "./components/MilestonePanel";
 import { GmailSyncPanel } from "./components/GmailSync";
 import { DEFAULT_BANK_RULES } from "./utils/passwords";
 
@@ -329,7 +330,7 @@ export default function App(){
   const unpaidRecs=records.filter(r=>!r.paid);
   const unpaidTotal=unpaidRecs.reduce((s,r)=>s+(r.dueAmount||0),0);
   const currency=records.find(r=>r.currency)?.currency||"";
-  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["settings","⚙ Settings"]];
+  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["milestone","🎯 Milestones"],["settings","⚙ Settings"]];
 
   return(
     <>
@@ -540,6 +541,8 @@ export default function App(){
 
         {/* Settings */}
         {activeTab==="itr"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>💰 ITR Repayment Tracker</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Track credit card repayments per person per bank. Banks report ≥₹10L to IT dept.</p><ITRPanel itrData={itrData} setItrData={setItrData}/></div>}
+
+        {activeTab==="milestone"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>🎯 Milestone Tracker</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Track annual fee waivers, cashback tiers, reward milestones per card. Each card tracks from its own renewal date.</p><MilestonePanel/></div>}
 
         {activeTab==="bankrules"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>🏦 Bank Password Rules</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Define exact password formula per bank. App tries only these — no more 80-attempt guessing.</p><BankRulesPanel rules={bankRules} onUpdate={setBankRules}/></div>}
 
