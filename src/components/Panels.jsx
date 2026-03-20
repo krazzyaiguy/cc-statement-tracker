@@ -458,14 +458,6 @@ function getCurrentFY() {
   return month >= 4 ? `${year}-${year+1}` : `${year-1}-${year}`;
 }
 
-function getFYRange(fy) {
-  const [startY] = fy.split("-").map(Number);
-  return {
-    start: new Date(startY, 3, 1),    // April 1
-    end:   new Date(startY+1, 2, 31)  // March 31
-  };
-}
-
 export function ITRPanel({ records, onAddPayment }) {
   const [fy, setFY] = useState(getCurrentFY());
   const [itrData, setItrData] = useState(()=>{
@@ -509,14 +501,6 @@ export function ITRPanel({ records, onAddPayment }) {
       if(!d[fy][person]) d[fy][person]={};
       if(!d[fy][person][bank]) d[fy][person][bank]={payments:[]};
       d[fy][person][bank].payments.push({ amount:amt, date, addedAt:new Date().toISOString() });
-      return d;
-    });
-  };
-
-  const removePayment = (person, bank, idx) => {
-    setItrData(prev=>{
-      const d = JSON.parse(JSON.stringify(prev));
-      d[fy]?.[person]?.[bank]?.payments?.splice(idx,1);
       return d;
     });
   };
