@@ -211,31 +211,41 @@ export default function App(){
   const handleDeleteRecord=(r)=>setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
   const handlePartialPayment=(r,amt)=>{
     const paid=parseFloat(amt)||0;
-    if(!paid) return;
-    const remaining=Math.max(0,((r.originalAmount??r.dueAmount)||0)-paid);
+    if(paid===0) return;
+    const original = r.originalAmount ?? r.dueAmount ?? 0;
+    const history  = r.paymentHistory || [];
+    const now      = new Date();
+    const entry    = { amount:paid, date:now.toLocaleDateString("en-GB"), time:now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}), note: paid<0?"correction":"" };
+    const newHistory = [...history, entry];
+    const totalPaid  = newHistory.reduce((s,p)=>s+p.amount, 0);
+    const remaining  = Math.max(0, Math.round((original - totalPaid)*100)/100);
+
     setRecords(prev=>prev.map(rec=>rec.id===r.id?{
       ...rec,
-      paidAmount:(rec.paidAmount||0)+paid,
-      originalAmount:rec.originalAmount??rec.dueAmount,
-      dueAmount:Math.round(remaining*100)/100,
-      paid:remaining<=0
+      originalAmount: original,
+      dueAmount: remaining,
+      paidAmount: totalPaid,
+      paymentHistory: newHistory,
+      paid: remaining<=0
     }:rec));
-    // Auto-capture to ITR tracker (per person per bank)
-    const person = (r.cardholderName||"Unknown").trim().toUpperCase();
-    const bank   = (r.bankName||"Unknown").trim().toUpperCase();
-    const today  = new Date().toISOString().slice(0,10);
-    const now    = new Date();
-    const fyStart = now.getMonth()>=3 ? now.getFullYear() : now.getFullYear()-1;
-    const fy     = `${fyStart}-${fyStart+1}`;
-    setItrData(prev=>{
-      const d = JSON.parse(JSON.stringify(prev));
-      if(!d[fy]) d[fy]={};
-      if(!d[fy][person]) d[fy][person]={};
-      if(!d[fy][person][bank]) d[fy][person][bank]={payments:[]};
-      d[fy][person][bank].payments.push({amount:paid,date:today,card:r.lastFourDigits||"",addedAt:new Date().toISOString()});
-      try{localStorage.setItem('cc_itr_v1',JSON.stringify(d));}catch{}
-      return d;
-    });
+
+    // Only add to ITR if positive payment (not corrections)
+    if(paid>0){
+      const person  = (r.cardholderName||"Unknown").trim().toUpperCase();
+      const bank    = (r.bankName||"Unknown").trim().toUpperCase();
+      const today   = now.toISOString().slice(0,10);
+      const fyStart = now.getMonth()>=3 ? now.getFullYear() : now.getFullYear()-1;
+      const fy      = `${fyStart}-${fyStart+1}`;
+      setItrData(prev=>{
+        const d = JSON.parse(JSON.stringify(prev));
+        if(!d[fy]) d[fy]={};
+        if(!d[fy][person]) d[fy][person]={};
+        if(!d[fy][person][bank]) d[fy][person][bank]={payments:[]};
+        d[fy][person][bank].payments.push({amount:paid,date:today,card:r.lastFourDigits||"",addedAt:now.toISOString()});
+        try{localStorage.setItem("cc_itr_v1",JSON.stringify(d));}catch{}
+        return d;
+      });
+    }
   };
 
 
@@ -407,7 +417,31 @@ export default function App(){
                         <td style={{padding:"9px 10px",color:r.paid?"#64748b":"#fbbf24",fontWeight:500,whiteSpace:"nowrap"}}>{r.dueDate||"—"}</td>
                         <td style={{padding:"9px 10px",color:r.paid?"#64748b":"#f87171",fontWeight:700,whiteSpace:"nowrap"}}>{ (r.originalAmount??r.dueAmount)!=null?`${r.currency||""} ${Number(r.originalAmount??r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}`:"—"}</td>
                         <td style={{padding:"9px 6px"}}><input type="number" placeholder="pay" min="0" style={{width:65,background:"#0d1424",border:"1px solid #1e293b",borderRadius:4,color:"#94a3b8",padding:"2px 5px",fontFamily:"'DM Mono',monospace",fontSize:10}} onKeyDown={e=>{if(e.key==="Enter"&&e.target.value){handlePartialPayment(r,e.target.value);e.target.value="";}}} title="Type amount paid, press Enter"/></td>
-                        <td style={{padding:"9px 10px",color:r.paid?"#4ade80":r.dueAmount<(r.originalAmount??r.dueAmount)?"#fb923c":"#f87171",fontWeight:700,whiteSpace:"nowrap"}}>{r.dueAmount!=null?`${r.currency||""} ${Number(r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}`:"—"}</td>
+                        <td style={{padding:"9px 10px",whiteSpace:"nowrap"}}>
+                          <div>
+                            <span style={{color:r.paid?"#4ade80":r.dueAmount<(r.originalAmount??r.dueAmount)?"#fb923c":"#f87171",fontWeight:700}}>
+                              {r.dueAmount!=null?`${r.currency||""} ${Number(r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}`:"—"}
+                            </span>
+                            {r.paymentHistory?.length>0&&(
+                              <details style={{fontSize:9}}>
+                                <summary style={{cursor:"pointer",color:"#3b82f6",listStyle:"none",marginTop:2}}>📋 {r.paymentHistory.length} payment{r.paymentHistory.length>1?"s":""}</summary>
+                                <div style={{background:"#080c14",border:"1px solid #1e293b",borderRadius:6,padding:"8px",marginTop:4,minWidth:220,position:"absolute",zIndex:99}}>
+                                  <div style={{color:"#60a5fa",fontSize:9,fontWeight:600,marginBottom:6}}>PAYMENT HISTORY</div>
+                                  {r.paymentHistory.map((p,i)=>(
+                                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderBottom:"1px solid #0f1929",gap:8}}>
+                                      <span style={{color:"#475569",fontSize:9}}>{p.date} {p.time}</span>
+                                      <span style={{color:p.amount<0?"#f97316":"#4ade80",fontWeight:600,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{p.amount<0?"−":"+"}{r.currency||""} {Math.abs(p.amount).toLocaleString("en-IN",{minimumFractionDigits:2})}{p.note?` (${p.note})`:""}</span>
+                                    </div>
+                                  ))}
+                                  <div style={{display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:4,borderTop:"1px solid #1e293b"}}>
+                                    <span style={{color:"#475569",fontSize:9}}>Net paid</span>
+                                    <span style={{color:"#4ade80",fontWeight:700,fontSize:10}}>{r.currency||""} {Number(r.paidAmount||0).toLocaleString("en-IN",{minimumFractionDigits:2})}</span>
+                                  </div>
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        </td>
                         <td style={{padding:"9px 10px"}}><span style={{fontSize:9,color:r.source==="gmail"?"#60a5fa":"#334155"}}>{r.source==="gmail"?"📧":"📂"}</span></td>
                         <td style={{padding:"9px 10px"}}><button onClick={()=>handleTogglePaid(r)} style={{background:r.paid?"#052e16":"#1e293b",color:r.paid?"#4ade80":"#94a3b8",border:"none",borderRadius:5,padding:"3px 9px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,fontWeight:700,whiteSpace:"nowrap"}}>{r.paid?"✓ PAID":"PENDING"}</button></td>
                         <td style={{padding:"9px 10px"}}><button onClick={()=>handleDeleteRecord(r)} style={{background:"none",border:"none",color:"#334155",cursor:"pointer",fontSize:13,padding:"0 2px"}}>✕</button></td>
