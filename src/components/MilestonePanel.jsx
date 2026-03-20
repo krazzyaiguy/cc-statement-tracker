@@ -20,8 +20,6 @@ export function MilestonePanel() {
     try{ return JSON.parse(localStorage.getItem(MILESTONE_KEY)||"[]"); }catch{ return []; }
   });
   const [showAdd, setShowAdd] = useState(false);
-  const [editId, setEditId] = useState(null);
-
   // Form state
   const [form, setForm] = useState({
     cardName:"", bankName:"", last4:"", cardholderName:"",
