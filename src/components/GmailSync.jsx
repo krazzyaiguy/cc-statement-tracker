@@ -243,7 +243,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
             ):(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 <span style={{color:"#475569"}}>First sync — look back:</span>
-                {[15,30,60,90].map(d=>(
+                {[1,7,15,30,60,90].map(d=>(
                   <button key={d} onClick={()=>setSyncDays(d)} style={{background:syncDays===d?"#1e40af":"none",border:`1px solid ${syncDays===d?"#3b82f6":"#1e293b"}`,color:syncDays===d?"#fff":"#475569",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10}}>{d} days</button>
                 ))}
               </div>
