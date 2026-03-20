@@ -155,6 +155,22 @@ export default function App(){
     if(user&&processedIds.length>0) saveMeta(user.uid,{processedIds}).catch(()=>{});
   },[user,processedIds]); // eslint-disable-line
 
+  // Auto-delete records older than retention days
+  const retentionDays = settings?.retentionDays || 60;
+  useEffect(()=>{
+    if(!records.length) return;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate()-retentionDays);
+    const fresh = records.filter(r=>{
+      if(!r.receivedOn) return true;
+      const parts = r.receivedOn.split("/");
+      if(parts.length!==3) return true;
+      const d = new Date(parts[2],parts[1]-1,parts[0]);
+      return d >= cutoff;
+    });
+    if(fresh.length < records.length) setRecords(fresh);
+  },[retentionDays,records.length]); // eslint-disable-line
+
   const handleSaveKey=(s)=>{ setSettings(s); ls.set(SETTINGS_KEY,s); };
   const handleRetentionChange=(days)=>{ const s={...settings,retentionDays:days}; setSettings(s); ls.set(SETTINGS_KEY,s); };
 
@@ -204,25 +220,7 @@ export default function App(){
     }:rec));
   };
 
-  // Auto-delete records older than retention days (runs on load)
-  const retentionDays = settings?.retentionDays || 60;
-  useEffect(()=>{
-    if(!records.length) return;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate()-retentionDays);
-    const fresh = records.filter(r=>{
-      if(!r.receivedOn) return true;
-      // Parse DD/MM/YYYY
-      const parts = r.receivedOn.split("/");
-      if(parts.length!==3) return true;
-      const d = new Date(parts[2],parts[1]-1,parts[0]);
-      return d >= cutoff;
-    });
-    if(fresh.length < records.length){
-      console.log(`Auto-deleted ${records.length-fresh.length} records older than ${retentionDays} days`);
-      setRecords(fresh);
-    }
-  },[retentionDays]); // eslint-disable-line
+
 
   // Manual upload
   const addFiles=(newFiles)=>{
