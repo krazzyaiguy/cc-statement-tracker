@@ -28,6 +28,8 @@ export default function App(){
   const[vault,setVault]         = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_vault_v2')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[bankRules,setBankRules]   = useState(()=>{ try{const v=JSON.parse(localStorage.getItem(BANK_RULES_KEY)||'null');return Array.isArray(v)?v:DEFAULT_BANK_RULES;}catch{return DEFAULT_BANK_RULES;} });
   const[itrData,setItrData]       = useState(()=>{ try{return JSON.parse(localStorage.getItem('cc_itr_v1')||'{}');}catch{return {};} });
+  const[editCell,setEditCell]     = useState(null); // {id, field}
+  const[editVal,setEditVal]       = useState("");
   const[people,setPeople]       = useState(()=>{ try{const v=JSON.parse(localStorage.getItem('cc_people_v1')||'[]');return Array.isArray(v)?v:[];}catch{return [];} });
   const[processedIds,setProcessedIds] = useState([]);
   const[files,setFiles]         = useState([]);
@@ -208,8 +210,40 @@ export default function App(){
   const handleUpdatePerson =(fid,data)=>setPeople(prev=>prev.map(p=>(p.firestoreId||p.id)===fid?{...p,...data}:p));
   const handleDeletePerson =(fid)=>setPeople(prev=>prev.filter(p=>(p.firestoreId||p.id)!==fid));
 
+  // ── Date helpers ─────────────────────────────────────────────────────────────
+  const parseDate=(s)=>{ if(!s)return null; const[d,m,y]=s.split("/"); return new Date(y,m-1,d); };
+  const daysUntil=(s)=>{ const d=parseDate(s); if(!d)return null; return Math.ceil((d-new Date().setHours(0,0,0,0))/(86400000)); };
+  const getDueStatus=(r)=>{
+    if(r.paid) return {label:"✓ PAID",color:"#4ade80",bg:"#052e16",urgent:false};
+    const days=daysUntil(r.dueDate);
+    if(days===null) return {label:"PENDING",color:"#94a3b8",bg:"#1e293b",urgent:false};
+    if(days<0&&days>=-3) return {label:`GRACE ${-days}d left`,color:"#fff",bg:"#7f1d1d",urgent:true,blink:true};
+    if(days<0) return {label:"OVERDUE",color:"#fca5a5",bg:"#450a0a",urgent:true};
+    if(days===0) return {label:"DUE TODAY",color:"#fff",bg:"#b45309",urgent:true,blink:true};
+    if(days<=3) return {label:`DUE in ${days}d`,color:"#fff",bg:"#c2410c",urgent:true};
+    if(days<=7) return {label:`DUE in ${days}d`,color:"#fbbf24",bg:"#1e293b",urgent:false};
+    return {label:"PENDING",color:"#94a3b8",bg:"#1e293b",urgent:false};
+  };
+
+  // Sort records: unpaid by due date ascending, paid at bottom
+  const sortedRecords = [...records].sort((a,b)=>{
+    if(a.paid&&!b.paid) return 1;
+    if(!a.paid&&b.paid) return -1;
+    const da=parseDate(a.dueDate), db=parseDate(b.dueDate);
+    if(!da&&!db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return da-db;
+  });
+
   const handleTogglePaid=(r)=>setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,paid:!rec.paid,paidAmount:!rec.paid?rec.dueAmount:0}:rec));
   const handleDeleteRecord=(r)=>setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
+  const startEdit=(id,field,val)=>{ setEditCell({id,field}); setEditVal(val||""); };
+  const commitEdit=(r)=>{
+    if(!editCell) return;
+    setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,[editCell.field]:editCell.field==="dueAmount"?parseFloat(editVal)||rec.dueAmount:editVal}:rec));
+    setEditCell(null);
+  };
   const handlePartialPayment=(r,amt)=>{
     const paid=parseFloat(amt)||0;
     if(paid===0) return;
@@ -298,6 +332,8 @@ export default function App(){
   const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["settings","⚙ Settings"]];
 
   return(
+    <>
+    <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
     <div style={{minHeight:"100vh",background:"#080c14",paddingBottom:48}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
@@ -405,17 +441,49 @@ export default function App(){
                   ))}
                 </div>
               </div>
+              {/* Urgent due date alerts */}
+              {(()=>{
+                const urgent=sortedRecords.filter(r=>!r.paid&&(()=>{const d=daysUntil(r.dueDate);return d!==null&&d<=3;})());
+                if(!urgent.length) return null;
+                return <div style={{marginBottom:12}}>
+                  {urgent.map(r=>{const s=getDueStatus(r);return(
+                    <div key={r.id} style={{background:s.bg,border:`1px solid ${s.color}44`,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between",animation:s.blink?"pulse 1s infinite":"none"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:16}}>{s.label.includes("GRACE")?"⚠️":s.label.includes("TODAY")?"🚨":"🔴"}</span>
+                        <div>
+                          <span style={{color:"#fff",fontWeight:700,fontSize:12}}>{r.cardholderName||"?"} · {r.bankName||"?"} ••••{r.lastFourDigits||"?"}</span>
+                          <span style={{color:s.color,fontSize:11,marginLeft:8}}>{s.label}</span>
+                          {s.label.includes("GRACE")&&<span style={{color:"#fca5a5",fontSize:10,marginLeft:6}}>— Pay now to avoid late fee!</span>}
+                        </div>
+                      </div>
+                      <span style={{color:"#fff",fontWeight:700,fontSize:13}}>{r.currency||""} {Number(r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}</span>
+                    </div>
+                  );})}
+                </div>;
+              })()}
               <div className="tbl-sc" style={{border:"1px solid #1e293b",borderRadius:10}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:640}}>
                   <thead><tr style={{background:"#0d1424"}}>{["#","Cardholder","Bank","Card","Due Date","Amount","Paid","Balance","Src","Status",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:"#334155",fontWeight:500,fontSize:9,letterSpacing:"0.06em",textTransform:"uppercase",borderBottom:"1px solid #1e293b",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {records.map((r,i)=>(
+                    {sortedRecords.map((r,i)=>(
                       <tr key={r.firestoreId||r.id} className="row-h" style={{background:r.paid?"#071a0f":"#0a0e1a",opacity:r.paid?.6:1}}>
                         <td style={{padding:"9px 10px",color:"#334155"}}>{i+1}</td>
-                        <td style={{padding:"9px 10px",color:"#e2e8f0",fontWeight:500,whiteSpace:"nowrap"}}>{r.cardholderName||<span style={{color:"#1e293b"}}>—</span>}</td>
-                        <td style={{padding:"9px 10px",color:"#94a3b8",whiteSpace:"nowrap"}}>{r.bankName||"—"}</td>
+                        <td style={{padding:"6px 10px",color:"#e2e8f0",fontWeight:500,whiteSpace:"nowrap"}} onClick={()=>startEdit(r.id,"cardholderName",r.cardholderName)}>
+                          {editCell?.id===r.id&&editCell.field==="cardholderName"
+                            ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#fff",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:11,width:120}}/>
+                            :<span style={{cursor:"text",borderBottom:"1px dashed #1e293b"}}>{r.cardholderName||<span style={{color:"#334155"}}>— click to edit</span>}</span>}
+                        </td>
+                        <td style={{padding:"6px 10px",color:"#94a3b8",whiteSpace:"nowrap"}} onClick={()=>startEdit(r.id,"bankName",r.bankName)}>
+                          {editCell?.id===r.id&&editCell.field==="bankName"
+                            ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#fff",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/>
+                            :<span style={{cursor:"text",borderBottom:"1px dashed #1e293b"}}>{r.bankName||"—"}</span>}
+                        </td>
                         <td style={{padding:"9px 10px"}}>{r.lastFourDigits?<span style={{background:"#1e293b",padding:"2px 6px",borderRadius:4,color:"#60a5fa",fontWeight:600}}>••••{r.lastFourDigits}</span>:"—"}</td>
-                        <td style={{padding:"9px 10px",color:r.paid?"#64748b":"#fbbf24",fontWeight:500,whiteSpace:"nowrap"}}>{r.dueDate||"—"}</td>
+                        <td style={{padding:"6px 10px",whiteSpace:"nowrap"}} onClick={()=>!r.paid&&startEdit(r.id,"dueDate",r.dueDate)}>
+                          {editCell?.id===r.id&&editCell.field==="dueDate"
+                            ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} placeholder="DD/MM/YYYY" style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#fbbf24",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:11,width:95}}/>
+                            :(()=>{const s=getDueStatus(r);return <span style={{color:r.paid?"#64748b":s.urgent?"#fff":"#fbbf24",fontWeight:500,cursor:r.paid?"default":"text",borderBottom:r.paid?"none":"1px dashed #1e293b"}}>{r.dueDate||"—"}</span>;})()}
+                        </td>
                         <td style={{padding:"9px 10px",color:r.paid?"#64748b":"#f87171",fontWeight:700,whiteSpace:"nowrap"}}>{ (r.originalAmount??r.dueAmount)!=null?`${r.currency||""} ${Number(r.originalAmount??r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}`:"—"}</td>
                         <td style={{padding:"9px 6px"}}><input type="number" placeholder="pay" min="0" style={{width:65,background:"#0d1424",border:"1px solid #1e293b",borderRadius:4,color:"#94a3b8",padding:"2px 5px",fontFamily:"'DM Mono',monospace",fontSize:10}} onKeyDown={e=>{if(e.key==="Enter"&&e.target.value){handlePartialPayment(r,e.target.value);e.target.value="";}}} title="Type amount paid, press Enter"/></td>
                         <td style={{padding:"9px 10px",whiteSpace:"nowrap"}}>
@@ -444,7 +512,7 @@ export default function App(){
                           </div>
                         </td>
                         <td style={{padding:"9px 10px"}}><span style={{fontSize:9,color:r.source==="gmail"?"#60a5fa":"#334155"}}>{r.source==="gmail"?"📧":"📂"}</span></td>
-                        <td style={{padding:"9px 10px"}}><button onClick={()=>handleTogglePaid(r)} style={{background:r.paid?"#052e16":"#1e293b",color:r.paid?"#4ade80":"#94a3b8",border:"none",borderRadius:5,padding:"3px 9px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,fontWeight:700,whiteSpace:"nowrap"}}>{r.paid?"✓ PAID":"PENDING"}</button></td>
+                        <td style={{padding:"9px 10px"}}>{(()=>{const s=getDueStatus(r);return(<button onClick={()=>handleTogglePaid(r)} style={{background:s.bg,color:s.color,border:"none",borderRadius:5,padding:"3px 9px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,fontWeight:700,whiteSpace:"nowrap",animation:s.blink?"pulse 1.5s infinite":""}}>{s.label}</button>);})()}</td>
                         <td style={{padding:"9px 10px"}}><button onClick={()=>handleDeleteRecord(r)} style={{background:"none",border:"none",color:"#334155",cursor:"pointer",fontSize:13,padding:"0 2px"}}>✕</button></td>
                       </tr>
                     ))}
@@ -489,6 +557,7 @@ export default function App(){
         </div>}
       </div>
     </div>
+  </>
   );
 }
 
