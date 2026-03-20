@@ -463,7 +463,7 @@ export default function App(){
               })()}
               <div className="tbl-sc" style={{border:"1px solid #1e293b",borderRadius:10}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:640}}>
-                  <thead><tr style={{background:"#0d1424"}}>{["#","Cardholder","Bank","Card","Due Date","Amount","Paid","Balance","Src","Status",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:"#334155",fontWeight:500,fontSize:9,letterSpacing:"0.06em",textTransform:"uppercase",borderBottom:"1px solid #1e293b",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                  <thead><tr style={{background:"#0d1424"}}>{["#","Cardholder","Bank","Card","Due Date","Amount","Paid","Balance","Pmts Rcvd","Src","Status",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:"#334155",fontWeight:500,fontSize:9,letterSpacing:"0.06em",textTransform:"uppercase",borderBottom:"1px solid #1e293b",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
                   <tbody>
                     {sortedRecords.map((r,i)=>(
                       <tr key={r.firestoreId||r.id} className="row-h" style={{background:r.paid?"#071a0f":"#0a0e1a",opacity:r.paid?.6:1}}>
@@ -510,6 +510,14 @@ export default function App(){
                               </details>
                             )}
                           </div>
+                        </td>
+                        <td style={{padding:"9px 10px",whiteSpace:"nowrap"}}>
+                          {r.paymentsReceived ? (
+                            <div>
+                              <span style={{color:"#4ade80",fontSize:10,fontWeight:600}}>₹{Number(r.paymentsReceived).toLocaleString("en-IN",{maximumFractionDigits:0})}</span>
+                              {r.accumulatedSpends&&<div style={{color:"#475569",fontSize:9}}>Spends: ₹{Number(r.accumulatedSpends).toLocaleString("en-IN",{maximumFractionDigits:0})}</div>}
+                            </div>
+                          ) : <span style={{color:"#1e293b"}}>—</span>}
                         </td>
                         <td style={{padding:"9px 10px"}}><span style={{fontSize:9,color:r.source==="gmail"?"#60a5fa":"#334155"}}>{r.source==="gmail"?"📧":"📂"}</span></td>
                         <td style={{padding:"9px 10px"}}>{(()=>{const s=getDueStatus(r);return(<button onClick={()=>handleTogglePaid(r)} style={{background:s.bg,color:s.color,border:"none",borderRadius:5,padding:"3px 9px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,fontWeight:700,whiteSpace:"nowrap",animation:s.blink?"pulse 1.5s infinite":""}}>{s.label}</button>);})()}</td>
