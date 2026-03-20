@@ -11,7 +11,8 @@ import {
   loadMeta, saveMeta,
 } from "./firebase";
 import { SetupScreen } from "./components/SetupScreen";
-import { S, Badge, PasswordModal, VaultPanel, PeoplePanel, BankRulesPanel, SettingsPanel, ITRPanel } from "./components/Panels";
+import { S, Badge, PasswordModal, VaultPanel, PeoplePanel, BankRulesPanel, SettingsPanel } from "./components/Panels";
+import { ITRPanel } from "./components/ITRPanel";
 import { GmailSyncPanel } from "./components/GmailSync";
 import { DEFAULT_BANK_RULES } from "./utils/passwords";
 
