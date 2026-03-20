@@ -162,6 +162,36 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
               result.fileName=fname;result.receivedOn=new Date(date).toLocaleDateString("en-GB");
               result.source="gmail";result.paid=false;result.id=`gmail-${id}-${fname}`;
               newRecords.push(result);
+
+              // Auto-capture paymentsReceived into ITR tracker
+              if(result.paymentsReceived && result.paymentsReceived > 0 && result.cardholderName && result.bankName){
+                const person = result.cardholderName.trim().toUpperCase();
+                const bank   = result.bankName.trim().toUpperCase();
+                const today  = new Date(date).toISOString().slice(0,10);
+                const d      = new Date(date);
+                const fyStart= d.getMonth()>=3 ? d.getFullYear() : d.getFullYear()-1;
+                const fy     = `${fyStart}-${fyStart+1}`;
+                const itrRaw = localStorage.getItem("cc_itr_v1");
+                const itr    = itrRaw ? JSON.parse(itrRaw) : {};
+                if(!itr[fy]) itr[fy]={};
+                if(!itr[fy][person]) itr[fy][person]={};
+                if(!itr[fy][person][bank]) itr[fy][person][bank]={payments:[]};
+                // Avoid duplicate — check if this statement's payment already recorded
+                const alreadyAdded = itr[fy][person][bank].payments.some(p=>p.statementId===result.id);
+                if(!alreadyAdded){
+                  itr[fy][person][bank].payments.push({
+                    amount: result.paymentsReceived,
+                    date: today,
+                    card: result.lastFourDigits||"",
+                    statementId: result.id,
+                    source: "auto-from-statement",
+                    addedAt: new Date().toISOString()
+                  });
+                  localStorage.setItem("cc_itr_v1", JSON.stringify(itr));
+                  log(`   ↳ 💰 ITR: Recorded payment ₹${result.paymentsReceived.toLocaleString("en-IN")} for ${person} → ${bank}`,"success");
+                }
+              }
+              if(result.accumulatedSpends) log(`   ↳ 📊 Accumulated spends: ₹${Number(result.accumulatedSpends).toLocaleString("en-IN")}`);
               log(`   ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due: ${result.dueAmount||"?"} ${result.currency||""}`,"success");
             }catch(aiErr){
               log(`   ↳ ❌ Groq error: ${aiErr.message}`,"error");
