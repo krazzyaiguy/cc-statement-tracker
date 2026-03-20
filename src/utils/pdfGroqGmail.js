@@ -2,18 +2,24 @@
 
 const AI_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
-const EXTRACTION_PROMPT = `You are a credit card statement parser. Extract key billing information.
+const EXTRACTION_PROMPT = `You are a credit card statement parser. Extract billing information from this statement image.
 Return ONLY valid JSON, no markdown, no explanation:
 {
   "cardholderName": "string or null",
   "bankName": "string or null",
-  "lastFourDigits": "string (4 digits) or null",
+  "lastFourDigits": "string (exactly 4 digits only) or null",
   "statementDate": "DD/MM/YYYY or null",
   "dueDate": "DD/MM/YYYY or null",
   "dueAmount": number or null,
-  "currency": "string e.g. INR or null"
+  "currency": "INR or null"
 }
-Rules: lastFourDigits = only last 4 digits. Dates in DD/MM/YYYY. dueAmount = number only. null if not found.`;
+STRICT RULES:
+- cardholderName: Full name as printed on statement. Remove prefixes like MR, MRS, MS. e.g. "RAVI SHARMA" not "MR RAVI SHARMA"
+- lastFourDigits: ONLY the last 4 numeric digits of the card. If card shows "XXXX XXXX XXXX 1234" return "1234". Never return X or * characters.
+- dueAmount: The TOTAL AMOUNT DUE as a plain number in rupees. If shown in paise divide by 100. e.g. 5481.00 not 548100
+- dueDate: Payment due date in DD/MM/YYYY format
+- statementDate: Statement generation date in DD/MM/YYYY format
+- Return null for any field you cannot find with confidence`;
 
 // ─── PDF ──────────────────────────────────────────────────────────────────────
 export async function getPDFLib() {
