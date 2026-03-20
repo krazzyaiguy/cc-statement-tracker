@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ls } from "../utils/storage";
 import { resolvePasswords, extractHintsFromEmail } from "../utils/passwords";
 import { pdfBytesToBase64Image, tryPasswordsOnPDF, callGroq, fetchStatementEmails, fetchEmailWithAttachments, downloadAttachment } from "../utils/pdfGroqGmail";
@@ -11,6 +11,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
   const[gmailEmail,setGmailEmail]=useState(ls.get("cc_gmail_email",""));
   const[syncing,setSyncing]=useState(false);
   const[syncLog,setSyncLog]=useState([]);
+  const stopRef = useRef(false); // set to true to cancel mid-sync
   const[pwdRequest,setPwdRequest]=useState(null);
   const[lastSyncDate,setLastSyncDate]=useState(()=>ls.get("cc_last_sync_date",null));
   const[syncDays,setSyncDays]=useState(30); // days to look back on first sync
@@ -34,6 +35,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
 
   const runSync=async()=>{
     if(!gmailToken)return;
+    stopRef.current=false;
     setSyncing(true);setSyncLog([]);
     // Quick token check before starting
     try{
@@ -72,6 +74,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
       }
       const newRecords=[];
       for(const{id}of fresh){
+        if(stopRef.current){ log("⛔ Sync stopped by user","warn"); break; }
         try{
           const{subject,date,toAddress,pdfParts,bodyText}=await fetchEmailWithAttachments(id,gmailToken);
           log(`📧 Subject: "${subject}"`);
@@ -127,6 +130,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
                 log(`   ↳ ❌ PDF error: ${e.message}`,"error");continue;
               }
             }
+            if(stopRef.current){ log("⛔ Stopped before Groq call","warn"); break; }
             log(`   ↳ 🤖 Sending to Groq for extraction...`);
             try{
               const result=await callGroq(settings.geminiKey,imgBase64);
@@ -214,9 +218,16 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
             ⚠ <strong>Gmail tokens expire after 1 hour.</strong> If you see 401 errors, click Disconnect → Sign in again → Sync immediately.
           </div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-            <button onClick={runSync} disabled={syncing} style={{...S.btn(syncing?"#1e293b":"#1d4ed8",syncing),display:"flex",alignItems:"center",gap:8}}>
-              {syncing?"⟳ Syncing Gmail…":"⚡ Sync Gmail Now"}
-            </button>
+            {syncing ? (
+              <button onClick={()=>{stopRef.current=true;log("⛔ Stop requested — finishing current email...","warn");}}
+                style={{...S.btn("#7f1d1d"),display:"flex",alignItems:"center",gap:8,background:"#991b1b"}}>
+                ⛔ Stop Sync
+              </button>
+            ) : (
+              <button onClick={runSync} style={{...S.btn("#1d4ed8"),display:"flex",alignItems:"center",gap:8}}>
+                ⚡ Sync Gmail Now
+              </button>
+            )}
             <button onClick={()=>{onResetProcessed();log("🔄 Reset — will re-scan emails in current date range","success");}} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
               🔄 Re-scan
             </button>
