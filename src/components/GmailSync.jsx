@@ -20,7 +20,9 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
 
   const signIn=()=>{
     if(!settings.googleClientId){alert("Google Client ID not set. Go to ⚙ Settings.");return;}
-    const p=new URLSearchParams({client_id:settings.googleClientId,redirect_uri:window.location.origin+window.location.pathname,response_type:"token",scope:GMAIL_SCOPES,prompt:"consent"});
+    // Use only origin (no pathname) — must exactly match Google Cloud Console authorized redirect URI
+    const redirectUri = window.location.origin;
+    const p=new URLSearchParams({client_id:settings.googleClientId,redirect_uri:redirectUri,response_type:"token",scope:GMAIL_SCOPES,prompt:"consent"});
     window.location.href=`https://accounts.google.com/o/oauth2/v2/auth?${p}`;
   };
   const signOut=()=>{ls.del("cc_gmail_token");ls.del("cc_gmail_email");setGmailToken(null);setGmailEmail("");setSyncLog([]);};
@@ -144,11 +146,11 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
               // Use email-detected last4 if Groq returned garbage
               if(!result.lastFourDigits && emailLast4) result.lastFourDigits = emailLast4;
 
-              // Fix cardholderName — remove MR/MRS/MS prefix, fix reversed names
+              // Fix cardholderName — remove MR/MRS/MS prefix
               if(result.cardholderName){
                 result.cardholderName = result.cardholderName
                   .replace(/^(MR\.?\s+|MRS\.?\s+|MS\.?\s+|DR\.?\s+)/i,"")
-                  .trim();
+                  .trim().toUpperCase();
               }
 
               // Fix dueAmount — if suspiciously large (>1 crore) might be in paise
@@ -158,6 +160,36 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
 
               // Fix bankName — use email-detected bank if Groq missed it
               if(!result.bankName && emailBank) result.bankName = emailBank.toUpperCase();
+
+              // ── Cross-check with People registry (fixes Groq wrong name/card) ──
+              // Priority: email last4 → find exact card owner in registry
+              const cardLast4 = result.lastFourDigits || emailLast4;
+              if(cardLast4 && people?.length>0){
+                // Find person who owns this exact card
+                const exactMatch = people.find(p=>p.cards?.some(c=>c.last4===cardLast4));
+                if(exactMatch){
+                  // Override Groq's name with correct name from registry
+                  if(result.cardholderName !== exactMatch.fullName){
+                    log(`   ↳ 📋 Name corrected: "${result.cardholderName||"?"}" → "${exactMatch.fullName}" (from People registry)`);
+                    result.cardholderName = exactMatch.fullName;
+                  }
+                  // Also fix bank if registry has it
+                  const cardEntry = exactMatch.cards.find(c=>c.last4===cardLast4);
+                  if(cardEntry?.bankName && !result.bankName){
+                    result.bankName = cardEntry.bankName.toUpperCase();
+                  }
+                } else if(emailNameHint && !exactMatch){
+                  // No exact card match — try name hint to find person
+                  const nameMatch = people.find(p=>{
+                    const words = (p.fullName||"").toUpperCase().split(" ");
+                    return words.some(w=>w.length>=4&&emailNameHint.toUpperCase().startsWith(w.slice(0,4)));
+                  });
+                  if(nameMatch && !result.cardholderName){
+                    result.cardholderName = nameMatch.fullName;
+                    log(`   ↳ 📋 Name set from email hint: "${nameMatch.fullName}"`);
+                  }
+                }
+              }
 
               result.fileName=fname;result.receivedOn=new Date(date).toLocaleDateString("en-GB");
               result.source="gmail";result.paid=false;result.id=`gmail-${id}-${fname}`;
