@@ -174,6 +174,7 @@ export function ITRPanel() {
                       <div style={{height:"100%",width:`${pct}%`,background:sColor(data.total),borderRadius:2,transition:"width 0.3s"}}/>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:9}}>
+                    {(()=>{const cards=[...new Set(data.payments.filter(p=>p.card).map(p=>p.card))];return cards.length>0&&(<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}}>{cards.map(c=><span key={c} style={{background:"#0d1424",color:"#60a5fa",fontSize:9,padding:"1px 5px",borderRadius:3,fontFamily:"'DM Mono',monospace"}}>••••{c}</span>)}</div>);})()}
                       <button onClick={()=>setExpandedKey(expandedKey===key?null:key)}
                         style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:9,padding:0}}>
                         {expandedKey===key?"▲":"▼"} {data.payments.length} payment{data.payments.length!==1?"s":""}
@@ -186,8 +187,8 @@ export function ITRPanel() {
                         {data.payments.map((p,i)=>(
                           <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderBottom:"1px solid #0a0e1a",alignItems:"center",gap:4}}>
                             <span style={{color:"#334155",fontSize:9}}>{p.date}</span>
-                            <span style={{color:"#4ade80",fontSize:10,fontFamily:"'DM Mono',monospace",fontWeight:600}}>₹{fmtDec(p.amount)}</span>
-                            <button onClick={()=>deletePayment(person,bank,i)} style={{background:"none",border:"none",color:"#7f1d1d",cursor:"pointer",fontSize:11,padding:"0 2px"}} title="Delete this entry">✕</button>
+                             <span style={{color:"#334155",fontSize:9}}>{p.date}{p.card&&<span style={{color:"#60a5fa",marginLeft:4,fontFamily:"'DM Mono',monospace"}}>••••{p.card}</span>}</span>
+                             <span style={{color:"#4ade80",fontSize:10,fontFamily:"'DM Mono',monospace",fontWeight:600,flex:1,textAlign:"right"}}>₹{fmtDec(p.amount)}</span>
                           </div>
                         ))}
                         <div style={{display:"flex",justifyContent:"space-between",paddingTop:4,fontSize:10,fontWeight:700}}>
