@@ -15,15 +15,23 @@ Return ONLY valid JSON, no markdown, no explanation:
   "paymentsReceived": number or null,
   "accumulatedSpends": number or null
 }
-STRICT RULES:
-- cardholderName: Full name as printed on statement. Remove prefixes like MR, MRS, MS. e.g. "RAVI SHARMA" not "MR RAVI SHARMA"
-- lastFourDigits: ONLY the last 4 numeric digits of the card. If card shows "XXXX XXXX XXXX 1234" return "1234". Never return X or * characters.
-- dueAmount: The TOTAL AMOUNT DUE / TOTAL OUTSTANDING as a plain number in rupees. e.g. 18243.00
-- dueDate: Payment due date in DD/MM/YYYY format
-- statementDate: Statement generation date in DD/MM/YYYY format
-- paymentsReceived: Look for "Payments, Reversals & other Credits" or "Payment Received" or "Credits" in Account Summary. This is what the customer PAID last month. e.g. 1013.00
-- accumulatedSpends: Look for "Accumulated Spends till statement date" or "Total Spends" or "Year to date spends". e.g. 40845.00
-- Return null for any field you cannot find with confidence`;
+
+CRITICAL RULES — READ CAREFULLY:
+- cardholderName: Full name on statement. Strip MR/MRS/MS prefix.
+- lastFourDigits: ONLY last 4 numeric digits of card number. Never X or *.
+- dueAmount: The FINAL amount customer must PAY NOW. Look for:
+    "Total Amount Due", "Total Outstanding", "Amount Payable", "Minimum Amount Due" — use TOTAL not minimum.
+    This is AFTER subtracting payments. It is the CLOSING BALANCE or NET PAYABLE amount.
+    DO NOT use "Previous Balance", "Opening Balance", or any intermediate calculation.
+    DO NOT subtract or add anything yourself — just read the final "Total Outstanding" or "Total Due" figure.
+    Example from SBI: Account Summary shows Previous Balance 18938.95, Credits 1013, Total Outstanding 18243 — return 18243 NOT 18938.95
+- dueDate: Payment due date in DD/MM/YYYY. NOT statement date.
+- statementDate: Date statement was generated.
+- paymentsReceived: SEPARATE field — "Payments, Reversals & other Credits" from Account Summary.
+    This is historical (last month's payment). It does NOT affect dueAmount. e.g. 1013.00
+    This field is ONLY for record-keeping, never used to calculate what is owed.
+- accumulatedSpends: "Accumulated Spends till statement date" or "Year to date spends". e.g. 40845.00
+- Return null for any field not found with confidence.`;
 
 // ─── PDF ──────────────────────────────────────────────────────────────────────
 export async function getPDFLib() {
