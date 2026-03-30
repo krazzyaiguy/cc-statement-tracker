@@ -234,9 +234,10 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
         <div>
           <p style={{color:"#475569",fontSize:12,lineHeight:1.8,marginBottom:20}}>Connect Gmail to auto-find CC statement emails and extract data.</p>
           {!settings.googleClientId&&<div style={{background:"#2d1b0e",border:"1px solid #92400e",borderRadius:8,padding:"12px 14px",fontSize:12,color:"#fb923c",marginBottom:16,lineHeight:1.7}}>⚠ Google Client ID not set. Go to <strong>⚙ Settings</strong>.</div>}
-          <button onClick={signIn} disabled={!settings.googleClientId} style={{...S.btn("#15803d",!settings.googleClientId),display:"flex",alignItems:"center",gap:10,padding:"12px 24px"}}>
-            <span style={{fontSize:18,fontWeight:700}}>G</span> Sign in with Google
+          <button onClick={signIn} disabled={!settings.googleClientId} style={{...S.btn("#1d4ed8",!settings.googleClientId),display:"flex",alignItems:"center",gap:10,padding:"12px 24px"}}>
+            <span style={{fontSize:18,fontWeight:700}}>G</span> Sign in with Google (Gmail Access)
           </button>
+          <div style={{color:"#334155",fontSize:10,marginTop:8}}>This grants read-only Gmail access to find CC statement emails</div>
         </div>
       ):(
         <div>
