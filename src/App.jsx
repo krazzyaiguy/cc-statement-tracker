@@ -479,7 +479,11 @@ export default function App(){
                             ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#fff",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:11,width:100}}/>
                             :<span style={{cursor:"text",borderBottom:"1px dashed #1e293b"}}>{r.bankName||"—"}</span>}
                         </td>
-                        <td style={{padding:"9px 10px"}}>{r.lastFourDigits?<span style={{background:"#1e293b",padding:"2px 6px",borderRadius:4,color:"#60a5fa",fontWeight:600}}>••••{r.lastFourDigits}</span>:"—"}</td>
+                        <td style={{padding:"6px 10px"}} onClick={()=>startEdit(r.id,"lastFourDigits",r.lastFourDigits)}>
+                          {editCell?.id===r.id&&editCell.field==="lastFourDigits"
+                            ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value.replace(/\D/g,"").slice(0,4))} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} maxLength={4} style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#60a5fa",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:12,width:60,letterSpacing:"0.2em",textAlign:"center"}}/>
+                            :<span style={{background:"#1e293b",padding:"2px 6px",borderRadius:4,color:"#60a5fa",fontWeight:600,cursor:"text",borderBottom:"1px dashed #334155"}}>{r.lastFourDigits?"••••"+r.lastFourDigits:"— click"}</span>}
+                        </td>
                         <td style={{padding:"6px 10px",whiteSpace:"nowrap"}} onClick={()=>!r.paid&&startEdit(r.id,"dueDate",r.dueDate)}>
                           {editCell?.id===r.id&&editCell.field==="dueDate"
                             ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} placeholder="DD/MM/YYYY" style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#fbbf24",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:11,width:95}}/>
