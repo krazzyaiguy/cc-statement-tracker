@@ -493,6 +493,22 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
                         <td style={{padding:"9px 10px",color:r.paid?"#64748b":"#f87171",fontWeight:700,whiteSpace:"nowrap"}}>{ (r.originalAmount??r.dueAmount)!=null?`${r.currency||""} ${Number(r.originalAmount??r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}`:"—"}</td>
                         <td style={{padding:"9px 6px"}}><input type="number" placeholder="pay" min="0" style={{width:65,background:"#0d1424",border:"1px solid #1e293b",borderRadius:4,color:"#94a3b8",padding:"2px 5px",fontFamily:"'DM Mono',monospace",fontSize:10}} onKeyDown={e=>{if(e.key==="Enter"&&e.target.value){handlePartialPayment(r,e.target.value);e.target.value="";}}} title="Type amount paid, press Enter"/></td>
                         <td style={{padding:"9px 10px",whiteSpace:"nowrap"}}>
+                          <td style={{padding:"6px 6px"}}>
+  <div style={{display:"flex",flexDirection:"column",gap:2}}>
+    <input type="number" placeholder="pay ₹" min="0"
+      id={`pay-${r.id}`}
+      style={{width:72,background:"#0d1424",border:"1px solid #1e293b",borderRadius:4,color:"#94a3b8",padding:"2px 5px",fontFamily:"'DM Mono',monospace",fontSize:10}}
+      onKeyDown={e=>{if(e.key==="Enter"&&e.target.value){
+        const dateEl=document.getElementById(`paydate-${r.id}`);
+        handlePartialPayment(r,e.target.value,dateEl?.value||null);
+        e.target.value="";
+      }}} title="Type amount, press Enter"/>
+    <input type="date" id={`paydate-${r.id}`}
+      defaultValue={new Date().toISOString().slice(0,10)}
+      style={{width:72,background:"#0d1424",border:"1px solid #0f1929",borderRadius:4,color:"#334155",padding:"1px 3px",fontSize:8,fontFamily:"'DM Mono',monospace"}}
+      title="Change date if payment was on a different day"/>
+  </div>
+</td>
                           <div>
                             <span style={{color:r.paid?"#4ade80":r.dueAmount<(r.originalAmount??r.dueAmount)?"#fb923c":"#f87171",fontWeight:700}}>
                               {r.dueAmount!=null?`${r.currency||""} ${Number(r.dueAmount).toLocaleString("en-IN",{minimumFractionDigits:2})}`:"—"}
