@@ -245,13 +245,14 @@ export default function App(){
     setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,[editCell.field]:editCell.field==="dueAmount"?parseFloat(editVal)||rec.dueAmount:editVal}:rec));
     setEditCell(null);
   };
-  const handlePartialPayment=(r,amt)=>{
+  const handlePartialPayment=(r,amt,payDate)=>{
     const paid=parseFloat(amt)||0;
     if(paid===0) return;
     const original = r.originalAmount ?? r.dueAmount ?? 0;
     const history  = r.paymentHistory || [];
     const now      = new Date();
-    const entry    = { amount:paid, date:now.toLocaleDateString("en-GB"), time:now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}), note: paid<0?"correction":"" };
+const entryDate = payDate ? new Date(payDate).toLocaleDateString("en-GB") : now.toLocaleDateString("en-GB");
+const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}), note: paid<0?"correction":"" };
     const newHistory = [...history, entry];
     const totalPaid  = newHistory.reduce((s,p)=>s+p.amount, 0);
     const remaining  = Math.max(0, Math.round((original - totalPaid)*100)/100);
@@ -269,7 +270,7 @@ export default function App(){
     if(paid>0){
       const person  = (r.cardholderName||"Unknown").trim().toUpperCase();
       const bank    = (r.bankName||"Unknown").trim().toUpperCase();
-      const today   = now.toISOString().slice(0,10);
+      const today   = payDate || now.toISOString().slice(0,10);
       const fyStart = now.getMonth()>=3 ? now.getFullYear() : now.getFullYear()-1;
       const fy      = `${fyStart}-${fyStart+1}`;
       setItrData(prev=>{
