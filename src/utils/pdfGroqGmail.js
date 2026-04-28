@@ -18,8 +18,8 @@ export const AI_PROVIDERS = {
   },
   gemini: {
     label: "Google Gemini",
-    defaultModel: "gemini-1.5-flash",
-    models: ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+  defaultModel: "gemini-1.5-flash-latest",
+models: ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-2.0-flash"],
     keyPlaceholder: "AIza...",
     keyLink: "https://aistudio.google.com/apikey",
     keyNote: "Free — 1500 req/day",
