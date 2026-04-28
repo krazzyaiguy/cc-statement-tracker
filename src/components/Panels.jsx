@@ -426,12 +426,45 @@ export function BankRulesPanel({ rules, onUpdate }) {
 
 export function SettingsPanel({settings,onUpdate,onReset}){
   const[geminiKey,setGeminiKey]=useState(settings.geminiKey||"");
+  const[aiProvider,setAiProvider]=useState(settings.aiProvider||"groq");
+  const[aiModel,setAiModel]=useState(settings.aiModel||"");
   const[googleClientId,setGoogleClientId]=useState(settings.googleClientId||"");
   const[saved,setSaved]=useState(false);
-  const save=()=>{onUpdate({...settings,geminiKey:geminiKey.trim(),googleClientId:googleClientId.trim()});setSaved(true);setTimeout(()=>setSaved(false),2000);};
+
+  const PROVIDER_MODELS={
+    groq:["meta-llama/llama-4-scout-17b-16e-instruct","meta-llama/llama-4-maverick-17b-128e-instruct","llama-3.2-90b-vision-preview"],
+    gemini:["gemini-1.5-flash","gemini-1.5-pro","gemini-2.0-flash-exp"],
+    openai:["gpt-4o","gpt-4o-mini","gpt-4-turbo"],
+    claude:["claude-haiku-4-5","claude-sonnet-4-5","claude-opus-4-5"],
+    mistral:["pixtral-12b-2409","pixtral-large-2411"],
+  };
+  const PROVIDER_LINKS={groq:"https://console.groq.com/keys",gemini:"https://aistudio.google.com/apikey",openai:"https://platform.openai.com/api-keys",claude:"https://console.anthropic.com/keys",mistral:"https://console.mistral.ai/api-keys"};
+
+  const save=()=>{
+    onUpdate({...settings,geminiKey:geminiKey.trim(),aiProvider,aiModel:aiModel||(PROVIDER_MODELS[aiProvider]?.[0]||""),googleClientId:googleClientId.trim()});
+    setSaved(true);setTimeout(()=>setSaved(false),2000);
+  };
+
   return(
     <div>
-      <div style={{marginBottom:20}}><label style={S.label}>Groq API Key</label><input type="password" value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} style={{...S.input,marginBottom:6}}/><div style={{color:"#334155",fontSize:10}}><a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>console.groq.com/keys</a></div></div>
+      <div style={{marginBottom:16}}>
+        <label style={S.label}>AI Provider</label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+          {Object.keys(PROVIDER_MODELS).map(p=>(
+            <button key={p} onClick={()=>{setAiProvider(p);setAiModel(PROVIDER_MODELS[p][0]);}}
+              style={{background:aiProvider===p?"#1e40af":"#0a0e1a",border:`1px solid ${aiProvider===p?"#3b82f6":"#1e293b"}`,color:aiProvider===p?"#93c5fd":"#475569",borderRadius:7,padding:"5px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,fontWeight:600,textTransform:"uppercase"}}>
+              {p}
+            </button>
+          ))}
+        </div>
+        <label style={S.label}>Model</label>
+        <select value={aiModel||PROVIDER_MODELS[aiProvider]?.[0]} onChange={e=>setAiModel(e.target.value)} style={{...S.input,marginBottom:10,cursor:"pointer"}}>
+          {(PROVIDER_MODELS[aiProvider]||[]).map(m=><option key={m} value={m} style={{background:"#0d1424"}}>{m}</option>)}
+        </select>
+        <label style={S.label}>API Key</label>
+        <input type="password" value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} placeholder={aiProvider==="groq"?"gsk_...":aiProvider==="gemini"?"AIza...":aiProvider==="claude"?"sk-ant-...":"sk-..."} style={{...S.input,marginBottom:6}}/>
+        <div style={{color:"#334155",fontSize:10}}><a href={PROVIDER_LINKS[aiProvider]} target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>{PROVIDER_LINKS[aiProvider].replace("https://","")}</a></div>
+      </div>
       <div style={{marginBottom:24}}><label style={S.label}>Google OAuth Client ID</label><input type="text" value={googleClientId} onChange={e=>setGoogleClientId(e.target.value)} placeholder="xxxxxxx.apps.googleusercontent.com" style={{...S.input,marginBottom:6}}/></div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         <button onClick={save} style={S.btn("#15803d")}>{saved?"✓ Saved!":"Save Settings"}</button>
