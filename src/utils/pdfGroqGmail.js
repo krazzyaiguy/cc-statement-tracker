@@ -216,8 +216,7 @@ async function callAI(provider, apiKey, model, prompt, base64, mimeType = "image
             { inline_data: { mime_type: mimeType, data: base64 } },
             { text: prompt }
           ]}],
-          generationConfig: { temperature: 0.05, maxOutputTokens: 1000,
-            response_mime_type: "application/json" }
+          generationConfig: { temperature: 0.05, maxOutputTokens: 1000 }
         })
       }
     );
