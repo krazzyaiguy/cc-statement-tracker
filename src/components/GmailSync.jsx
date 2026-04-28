@@ -132,10 +132,10 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
                 log(`   ↳ ❌ PDF error: ${e.message}`,"error");continue;
               }
             }
-            if(stopRef.current){ log("⛔ Stopped before Groq call","warn"); break; }
-            log(`   ↳ 🤖 Sending to Groq for extraction...`);
-            try{
-              const result=await callGroq(settings.geminiKey,imgBase64);
+           if(stopRef.current){ log("⛔ Stopped before AI call","warn"); break; }
+log(`   ↳ 🤖 Sending to ${settings.aiProvider||"groq"} for extraction...`);
+try{
+  const result=await callGroq(settings.geminiKey,imgBase64,"image/jpeg",settings.aiProvider,settings.aiModel);
 
               // ── Post-process and clean extracted data ──────────────────────
               // Fix lastFourDigits — remove any X, x, * characters, keep only digits
@@ -226,8 +226,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
               if(result.accumulatedSpends) log(`   ↳ 📊 Accumulated spends: ₹${Number(result.accumulatedSpends).toLocaleString("en-IN")}`);
               log(`   ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due: ${result.dueAmount||"?"} ${result.currency||""}`,"success");
             }catch(aiErr){
-              log(`   ↳ ❌ Groq error: ${aiErr.message}`,"error");
-            }
+log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");            }
           }
           onProcessed(id);
         }catch(err){
