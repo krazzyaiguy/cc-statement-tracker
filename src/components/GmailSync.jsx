@@ -188,33 +188,60 @@ try{
               // Fix bankName — use email-detected bank if Groq missed it
               if(!result.bankName && emailBank) result.bankName = emailBank.toUpperCase();
 
-              // ── Cross-check with People registry (fixes Groq wrong name/card) ──
-              // Priority: email last4 → find exact card owner in registry
-              const cardLast4 = result.lastFourDigits || emailLast4;
-              if(cardLast4 && people?.length>0){
-                // Find person who owns this exact card
-                const exactMatch = people.find(p=>p.cards?.some(c=>c.last4===cardLast4));
-                if(exactMatch){
-                  // Override Groq's name with correct name from registry
-                  if(result.cardholderName !== exactMatch.fullName){
-                    log(`   ↳ 📋 Name corrected: "${result.cardholderName||"?"}" → "${exactMatch.fullName}" (from People registry)`);
-                    result.cardholderName = exactMatch.fullName;
-                  }
-                  // Also fix bank if registry has it
-                  const cardEntry = exactMatch.cards.find(c=>c.last4===cardLast4);
-                  if(cardEntry?.bankName && !result.bankName){
-                    result.bankName = cardEntry.bankName.toUpperCase();
-                  }
-                } else if(emailNameHint && !exactMatch){
-                  // No exact card match — try name hint to find person
-                  const nameMatch = people.find(p=>{
-                    const words = (p.fullName||"").toUpperCase().split(" ");
+              // ── Cross-check with People registry ──────────────────────────
+              // emailLast4 (from subject/filename) is more reliable than AI extraction
+              // Priority: emailLast4 first, then AI-extracted last4
+              const trustedLast4 = emailLast4 || result.lastFourDigits;
+              if(people?.length>0){
+                let registryMatch = null;
+                let matchedCard = null;
+
+                // 1st — match by trusted last4 (most reliable)
+                if(trustedLast4){
+                  registryMatch = people.find(p=>p.cards?.some(c=>c.last4===trustedLast4));
+                  if(registryMatch) matchedCard = registryMatch.cards.find(c=>c.last4===trustedLast4);
+                }
+
+                // 2nd — fallback: match by AI last4 if email didn't have one
+                if(!registryMatch && result.lastFourDigits){
+                  registryMatch = people.find(p=>p.cards?.some(c=>c.last4===result.lastFourDigits));
+                  if(registryMatch) matchedCard = registryMatch.cards.find(c=>c.last4===result.lastFourDigits);
+                }
+
+                // 3rd — fallback: match by name hint from email
+                if(!registryMatch && emailNameHint){
+                  registryMatch = people.find(p=>{
+                    const words=(p.fullName||"").toUpperCase().split(" ");
                     return words.some(w=>w.length>=4&&emailNameHint.toUpperCase().startsWith(w.slice(0,4)));
                   });
-                  if(nameMatch && !result.cardholderName){
-                    result.cardholderName = nameMatch.fullName;
-                    log(`   ↳ 📋 Name set from email hint: "${nameMatch.fullName}"`);
+                }
+
+                if(registryMatch){
+                  // Fix name
+                  if(result.cardholderName !== registryMatch.fullName){
+                    log(`   ↳ 📋 Name auto-fixed: "${result.cardholderName||"?"}" → "${registryMatch.fullName}"`)
+                    result.cardholderName = registryMatch.fullName;
                   }
+                  // Fix last4 — if AI got it wrong, use the trusted one
+                  if(trustedLast4 && result.lastFourDigits !== trustedLast4){
+                    log(`   ↳ 🔢 Last4 auto-fixed: "${result.lastFourDigits||"?"}" → "${trustedLast4}" (from email/filename)`);
+                    result.lastFourDigits = trustedLast4;
+                  }
+                  // Fix bank from registry card entry
+                  if(matchedCard?.bankName){
+                    const regBank = matchedCard.bankName.trim().toUpperCase();
+                    if(result.bankName !== regBank){
+                      log(`   ↳ 🏦 Bank auto-fixed: "${result.bankName||"?"}" → "${regBank}" (from People registry)`);
+                      result.bankName = regBank;
+                    }
+                  }
+                } else {
+                  // No registry match — still fix last4 from email if AI got garbage
+                  if(trustedLast4 && result.lastFourDigits !== trustedLast4){
+                    log(`   ↳ 🔢 Last4 corrected from email: "${result.lastFourDigits||"?"}" → "${trustedLast4}"`);
+                    result.lastFourDigits = trustedLast4;
+                  }
+                  log(`   ↳ ⚠ No People registry match for ••••${trustedLast4||"?"}  — add this card to People tab to enable auto-fix`,"warn");
                 }
               }
 
@@ -376,3 +403,4 @@ log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");
 }
 
 // ─── SETTINGS PANEL ───────────────────────────────────────────────────────────
+
