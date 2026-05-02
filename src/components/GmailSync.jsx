@@ -31,7 +31,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
   const doPause=(reason)=>{
     pauseRef.current=true;
     setPaused(true);
-    log(`⏸ Paused${reason?" — "+reason:""} · Click Resume to continue`,\"warn\");
+    log(`⏸ Paused${reason?" — "+reason:""} · Click Resume to continue`,"warn");
   };
 
   const doResume=()=>{
