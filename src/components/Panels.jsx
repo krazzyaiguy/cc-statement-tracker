@@ -433,7 +433,7 @@ export function SettingsPanel({settings,onUpdate,onReset}){
 
   const PROVIDER_MODELS={
     groq:["meta-llama/llama-4-scout-17b-16e-instruct","meta-llama/llama-4-maverick-17b-128e-instruct","llama-3.2-90b-vision-preview"],
-    gemini:["gemini-1.5-flash","gemini-1.5-pro","gemini-2.0-flash-exp"],
+    gemini:["gemini-2.5-flash-lite","gemini-2.5-flash","gemini-2.5-pro"],
     openai:["gpt-4o","gpt-4o-mini","gpt-4-turbo"],
     claude:["claude-haiku-4-5","claude-sonnet-4-5","claude-opus-4-5"],
     mistral:["pixtral-12b-2409","pixtral-large-2411"],
@@ -475,4 +475,5 @@ export function SettingsPanel({settings,onUpdate,onReset}){
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+
 
