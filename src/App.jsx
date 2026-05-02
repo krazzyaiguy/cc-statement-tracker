@@ -435,6 +435,22 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
             <>
               <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12,gap:10,flexWrap:"wrap"}}>
                 <button className="abtn" onClick={()=>exportToExcel(records)} style={S.btn("#15803d")}>⬇ Export Excel</button>
+                <button className="abtn" onClick={()=>{
+                  if(!people?.length){alert("No people in registry. Add cardholders in the 👥 People tab first.");return;}
+                  let fixed=0;
+                  setRecords(prev=>prev.map(r=>{
+                    const last4=r.lastFourDigits;
+                    if(!last4) return r;
+                    const match=people.find(p=>p.cards?.some(c=>c.last4===last4));
+                    if(!match) return r;
+                    const card=match.cards.find(c=>c.last4===last4);
+                    const updated={...r};
+                    if(updated.cardholderName!==match.fullName){updated.cardholderName=match.fullName;fixed++;}
+                    if(card?.bankName&&updated.bankName!==card.bankName.toUpperCase()) updated.bankName=card.bankName.toUpperCase();
+                    return updated;
+                  }));
+                  setTimeout(()=>alert(`✅ Auto-fix done — ${fixed} name(s) corrected from People registry`),100);
+                }} style={S.btn("#7c3aed")}>🔧 Auto-fix Names</button>
                 <button className="abtn" onClick={()=>{if(window.confirm("Clear ALL records?")) setRecords([]);}} style={{background:"none",border:"1px solid #3b1111",color:"#f87171",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:12}}>🗑 Clear All</button>
                 <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:"auto"}}>
                   <span style={{color:"#334155",fontSize:10}}>Auto-delete after:</span>
@@ -592,4 +608,5 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
   </>
   );
 }
+
 
