@@ -10,13 +10,36 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
   const[gmailToken,setGmailToken]=useState(ls.get("cc_gmail_token"));
   const[gmailEmail,setGmailEmail]=useState(ls.get("cc_gmail_email",""));
   const[syncing,setSyncing]=useState(false);
+  const[paused,setPaused]=useState(false);
   const[syncLog,setSyncLog]=useState([]);
-  const stopRef = useRef(false); // set to true to cancel mid-sync
+  const stopRef = useRef(false);   // set to true to cancel mid-sync
+  const pauseRef = useRef(false);  // set to true to pause between emails
+  const resumeRef = useRef(null);  // holds resolve fn to unpause
   const[pwdRequest,setPwdRequest]=useState(null);
+  const[pauseOnError,setPauseOnError]=useState(true); // auto-pause when AI errors
   const[lastSyncDate,setLastSyncDate]=useState(()=>ls.get("cc_last_sync_date",null));
   const[syncDays,setSyncDays]=useState(30); // days to look back on first sync
 
   const log=(msg,type="info")=>setSyncLog(prev=>[...prev.slice(-40),{msg,type,t:new Date().toLocaleTimeString()}]);
+
+  // Returns a promise that resolves when user clicks Resume (or immediately if not paused)
+  const waitIfPaused=()=>new Promise(resolve=>{
+    if(!pauseRef.current){resolve();return;}
+    resumeRef.current=resolve; // store resolve so Resume button can call it
+  });
+
+  const doPause=(reason)=>{
+    pauseRef.current=true;
+    setPaused(true);
+    log(`⏸ Paused${reason?" — "+reason:""} · Click Resume to continue`,\"warn\");
+  };
+
+  const doResume=()=>{
+    pauseRef.current=false;
+    setPaused(false);
+    log("▶ Resuming sync...","success");
+    if(resumeRef.current){resumeRef.current();resumeRef.current=null;}
+  };
 
   const signIn=()=>{
     if(!settings.googleClientId){alert("Google Client ID not set. Go to ⚙ Settings.");return;}
@@ -38,6 +61,8 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
   const runSync=async()=>{
     if(!gmailToken)return;
     stopRef.current=false;
+    pauseRef.current=false;
+    setPaused(false);
     setSyncing(true);setSyncLog([]);
     // Quick token check before starting
     try{
@@ -76,6 +101,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
       }
       const newRecords=[];
       for(const{id}of fresh){
+        await waitIfPaused();
         if(stopRef.current){ log("⛔ Sync stopped by user","warn"); break; }
         try{
           const{subject,date,toAddress,pdfParts,bodyText}=await fetchEmailWithAttachments(id,gmailToken);
@@ -133,6 +159,7 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
               }
             }
            if(stopRef.current){ log("⛔ Stopped before AI call","warn"); break; }
+           await waitIfPaused();
 log(`   ↳ 🤖 Sending to ${settings.aiProvider||"groq"} for extraction...`);
 try{
   const result=await callGroq(settings.geminiKey,imgBase64,"image/jpeg",settings.aiProvider,settings.aiModel);
@@ -226,7 +253,9 @@ try{
               if(result.accumulatedSpends) log(`   ↳ 📊 Accumulated spends: ₹${Number(result.accumulatedSpends).toLocaleString("en-IN")}`);
               log(`   ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due: ${result.dueAmount||"?"} ${result.currency||""}`,"success");
             }catch(aiErr){
-log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");            }
+log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");
+              if(pauseOnError){ doPause(`AI error on ${fname}`); }
+            }
           }
           onProcessed(id);
         }catch(err){
@@ -279,16 +308,39 @@ log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");            }
           <div style={{background:"#2d1b0e",border:"1px solid #92400e",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:11,color:"#fb923c",lineHeight:1.7}}>
             ⚠ <strong>Gmail tokens expire after 1 hour.</strong> If you see 401 errors, click Disconnect → Sign in again → Sync immediately.
           </div>
-          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
             {syncing ? (
-              <button onClick={()=>{stopRef.current=true;log("⛔ Stop requested — finishing current email...","warn");}}
-                style={{...S.btn("#7f1d1d"),display:"flex",alignItems:"center",gap:8,background:"#991b1b"}}>
-                ⛔ Stop Sync
-              </button>
+              <>
+                {paused ? (
+                  <button onClick={doResume}
+                    style={{...S.btn("#14532d"),display:"flex",alignItems:"center",gap:8,background:"#166534"}}>
+                    ▶ Resume
+                  </button>
+                ) : (
+                  <button onClick={()=>{doPause("");}}
+                    style={{...S.btn("#1e3a8a"),display:"flex",alignItems:"center",gap:8,background:"#1d4ed8"}}>
+                    ⏸ Pause
+                  </button>
+                )}
+                <button onClick={()=>{stopRef.current=true;pauseRef.current=false;if(resumeRef.current){resumeRef.current();resumeRef.current=null;}log("⛔ Stop requested — finishing current email...","warn");}}
+                  style={{...S.btn("#7f1d1d"),display:"flex",alignItems:"center",gap:8,background:"#991b1b"}}>
+                  ⛔ Stop
+                </button>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:4}}>
+                  <input type="checkbox" id="pauseOnErr" checked={pauseOnError} onChange={e=>setPauseOnError(e.target.checked)} style={{accentColor:"#f87171",cursor:"pointer"}}/>
+                  <label htmlFor="pauseOnErr" style={{color:"#94a3b8",fontSize:10,cursor:"pointer",userSelect:"none"}}>Auto-pause on AI error</label>
+                </div>
+              </>
             ) : (
-              <button onClick={runSync} style={{...S.btn("#1d4ed8"),display:"flex",alignItems:"center",gap:8}}>
-                ⚡ Sync Gmail Now
-              </button>
+              <>
+                <button onClick={runSync} style={{...S.btn("#1d4ed8"),display:"flex",alignItems:"center",gap:8}}>
+                  ⚡ Sync Gmail Now
+                </button>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:4}}>
+                  <input type="checkbox" id="pauseOnErr" checked={pauseOnError} onChange={e=>setPauseOnError(e.target.checked)} style={{accentColor:"#f87171",cursor:"pointer"}}/>
+                  <label htmlFor="pauseOnErr" style={{color:"#94a3b8",fontSize:10,cursor:"pointer",userSelect:"none"}}>Auto-pause on AI error</label>
+                </div>
+              </>
             )}
             <button onClick={()=>{onResetProcessed();log("🔄 Reset — will re-scan emails in current date range","success");}} style={{background:"none",border:"1px solid #1e293b",color:"#475569",borderRadius:8,padding:"10px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11}}>
               🔄 Re-scan
