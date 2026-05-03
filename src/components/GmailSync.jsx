@@ -279,19 +279,19 @@ try{
               }
               if(result.accumulatedSpends) log(`   ↳ 📊 Accumulated spends: ₹${Number(result.accumulatedSpends).toLocaleString("en-IN")}`);
               log(`   ↳ ✅ ${result.cardholderName||"?"} · ${result.bankName||"?"} ••••${result.lastFourDigits||"?"} · Due: ${result.dueAmount||"?"} ${result.currency||""}`,"success");
+              onProcessed(id); // ✅ only mark processed on SUCCESS
             }catch(aiErr){
-log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");
+log(`   ↳ ❌ AI error: ${aiErr.message} — email NOT marked processed, will retry next sync`,"error");
               if(pauseOnError){ doPause(`AI error on ${fname}`); }
+              // DO NOT call onProcessed(id) here — email stays in queue for retry
             }
           }
-          onProcessed(id);
-        }catch(err){
-          if(err.message.includes("401")){
+        }catch(err){\n          if(err.message.includes("401")){
             log("❌ Gmail token expired — please Disconnect and Sign in again","error");
-            signOut(); setSyncing(false); return; // stop immediately, no point continuing
+            signOut(); setSyncing(false); return;
           }
-          log(`❌ Error processing email: ${err.message}`,"error");
-          onProcessed(id);
+          log(`❌ Error processing email: ${err.message} — will retry next sync`,"error");
+          // DO NOT call onProcessed(id) — let it retry next sync
         }
       }
       if(newRecords.length>0){
