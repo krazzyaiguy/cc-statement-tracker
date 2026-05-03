@@ -289,7 +289,30 @@ async function callAI(provider, apiKey, model, prompt, base64, mimeType = "image
   return JSON.parse(cleaned);
 }
 
-// ─── MAIN EXPORT: Extract from image (with optional verification pass) ─────────
+// ─── RATE LIMIT HELPER ────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function callAIWithRetry(provider, apiKey, model, prompt, base64, mimeType, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      // Add 3s delay between every Gemini call to stay under 20 RPM
+      if (provider === "gemini" && i === 0) await sleep(3000);
+      return await callAI(provider, apiKey, model, prompt, base64, mimeType);
+    } catch (err) {
+      const msg = err.message || "";
+      // Check if rate limit error
+      const retryMatch = msg.match(/retry in (\d+(\.\d+)?)s/i);
+      if (retryMatch) {
+        const waitSec = Math.ceil(parseFloat(retryMatch[1])) + 2;
+        console.warn(`Rate limited — waiting ${waitSec}s before retry...`);
+        await sleep(waitSec * 1000);
+        continue; // retry
+      }
+      throw err; // non-rate-limit error — rethrow
+    }
+  }
+  throw new Error("Max retries exceeded after rate limit");
+}
 export async function callGroq(apiKey, base64, mimeType = "image/jpeg", providerOverride = null, modelOverride = null) {
   // Determine provider + model
   // providerOverride comes from settings.aiProvider; modelOverride from settings.aiModel
@@ -299,12 +322,12 @@ export async function callGroq(apiKey, base64, mimeType = "image/jpeg", provider
     "meta-llama/llama-4-scout-17b-16e-instruct";
 
   // Pass 1: Extract
-  const first = await callAI(provider, apiKey, model, EXTRACTION_PROMPT, base64, mimeType);
+  const first = await callAIWithRetry(provider, apiKey, model, EXTRACTION_PROMPT, base64, mimeType);
 
   // Pass 2: Verify (always — cheap insurance against digit misreads)
   let result;
   try {
-    const verified = await callAI(provider, apiKey, model, VERIFY_PROMPT(first), base64, mimeType);
+    const verified = await callAIWithRetry(provider, apiKey, model, VERIFY_PROMPT(first), base64, mimeType);
     // Merge: prefer verified values for numeric fields (most likely to have errors)
     result = {
       ...first,
