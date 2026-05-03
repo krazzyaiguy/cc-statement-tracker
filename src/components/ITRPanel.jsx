@@ -76,6 +76,23 @@ export function ITRPanel() {
     });
   };
 
+  const deleteBank = (person, bank) => {
+    if(!window.confirm(`Delete all ${bank} data for ${person} in FY ${fy}?`)) return;
+    setItrData(prev=>{ const d=JSON.parse(JSON.stringify(prev));
+      if(d[fy]?.[person]) delete d[fy][person][bank]; return d; });
+  };
+
+  const deletePerson = (person) => {
+    if(!window.confirm(`Delete ALL repayment data for ${person} in FY ${fy}?`)) return;
+    setItrData(prev=>{ const d=JSON.parse(JSON.stringify(prev));
+      if(d[fy]) delete d[fy][person]; return d; });
+  };
+
+  const clearAllITR = () => {
+    if(!window.confirm(`Clear ALL ITR data for FY ${fy}? This cannot be undone.`)) return;
+    setItrData(prev=>{ const d=JSON.parse(JSON.stringify(prev)); delete d[fy]; return d; });
+  };
+
   const addPayment = (person, bank, amount, date) => {
     const amt=parseFloat(amount)||0;
     if(!amt||!person||!bank) return;
@@ -110,6 +127,9 @@ export function ITRPanel() {
           </button>
         ))}
         <button onClick={()=>setFY(`${parseInt(fy)-1}-${parseInt(fy)}`)} style={{background:"none",border:"1px solid #1e293b",color:"#334155",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:11}}>+ Earlier FY</button>
+        {Object.keys(summary).length>0&&(
+          <button onClick={clearAllITR} style={{marginLeft:"auto",background:"none",border:"1px solid #7f1d1d",color:"#f87171",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:11}}>🗑 Clear FY {fy}</button>
+        )}
       </div>
 
       {Object.keys(summary).length===0 ? (
@@ -141,7 +161,10 @@ export function ITRPanel() {
                   </span>
                 )}
               </div>
-              <div style={{color:"#475569",fontSize:11}}>Total repaid: <strong style={{color:"#94a3b8"}}>₹{fmt(totalAll)}</strong></div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{color:"#475569",fontSize:11}}>Total repaid: <strong style={{color:"#94a3b8"}}>₹{fmt(totalAll)}</strong></div>
+                <button onClick={()=>deletePerson(person)} style={{background:"none",border:"1px solid #7f1d1d",color:"#f87171",borderRadius:4,padding:"2px 8px",cursor:"pointer",fontSize:10}} title="Delete all data for this person">🗑 Delete</button>
+              </div>
             </div>
 
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
@@ -166,7 +189,10 @@ export function ITRPanel() {
                           {bank} <span style={{fontSize:9}}>✏️</span>
                         </span>
                       )}
-                      <span style={{fontSize:9,color:sColor(data.total),fontWeight:600}}>{sLabel(data.total)}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:9,color:sColor(data.total),fontWeight:600}}>{sLabel(data.total)}</span>
+                        <button onClick={()=>deleteBank(person,bank)} style={{background:"none",border:"1px solid #7f1d1d",color:"#f87171",borderRadius:4,padding:"1px 6px",cursor:"pointer",fontSize:9}} title="Delete this bank entry">🗑</button>
+                      </div>
                     </div>
 
                     <div style={{fontSize:16,fontWeight:700,color:sColor(data.total),marginBottom:6}}>₹{fmt(data.total)}</div>
@@ -228,3 +254,4 @@ export function ITRPanel() {
     </div>
   );
 }
+
