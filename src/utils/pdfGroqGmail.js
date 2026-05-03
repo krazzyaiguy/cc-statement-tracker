@@ -377,3 +377,4 @@ export async function downloadAttachment(msgId, attId, token) {
   const d = await gmailFetch(`users/me/messages/${msgId}/attachments/${attId}`, token);
   return d.data.replace(/-/g, "+").replace(/_/g, "/");
 }
+
