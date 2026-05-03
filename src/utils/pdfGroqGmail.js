@@ -216,7 +216,7 @@ async function callAI(provider, apiKey, model, prompt, base64, mimeType = "image
             { inline_data: { mime_type: mimeType, data: base64 } },
             { text: prompt }
           ]}],
-          generationConfig: { temperature: 0.05, maxOutputTokens: 1000 }
+          generationConfig: { temperature: 0.05, maxOutputTokens: 1000, responseMimeType: "application/json" }
         })
       }
     );
@@ -280,8 +280,12 @@ async function callAI(provider, apiKey, model, prompt, base64, mimeType = "image
     raw = data.choices?.[0]?.message?.content || "";
   }
 
-  // Parse JSON — strip any accidental markdown fences
-  const cleaned = raw.replace(/```json|```/g, "").trim();
+  // Parse JSON — strip markdown fences, extract first JSON object if wrapped in text
+  let cleaned = raw.replace(/```json|```/gi, "").trim();
+  // If response has text before/after JSON, extract just the JSON object
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) cleaned = jsonMatch[0];
+  if (!cleaned) throw new Error("Empty response from AI");
   return JSON.parse(cleaned);
 }
 
