@@ -286,7 +286,8 @@ log(`   ↳ ❌ AI error: ${aiErr.message} — email NOT marked processed, will 
               // DO NOT call onProcessed(id) here — email stays in queue for retry
             }
           }
-        }catch(err){\n          if(err.message.includes("401")){
+        }catch(err){
+          if(err.message.includes("401")){
             log("❌ Gmail token expired — please Disconnect and Sign in again","error");
             signOut(); setSyncing(false); return;
           }
