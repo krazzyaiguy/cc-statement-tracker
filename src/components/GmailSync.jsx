@@ -177,7 +177,12 @@ export function GmailSyncPanel({settings,vault,people,bankRules,uid,onNewRecords
            while(!result && aiAttempts<3){
              aiAttempts++;
              try{
-               result=await callGroq(settings.geminiKey,imgBase64,"image/jpeg",settings.aiProvider,settings.aiModel,settings.geminiKey2||null);
+               // Build full key list — geminiKeys array takes priority over individual keys
+               const allGeminiKeys = settings.geminiKeys?.length>0
+                 ? settings.geminiKeys
+                 : [settings.geminiKey,settings.geminiKey2].filter(Boolean);
+               const [primaryKey,...backupKeys] = allGeminiKeys;
+               result=await callGroq(primaryKey,imgBase64,"image/jpeg",settings.aiProvider,settings.aiModel,backupKeys.length>0?backupKeys:null);
              }catch(aiErr){
                log(`   ↳ ❌ AI error: ${aiErr.message}`,"error");
                if(pauseOnError){
