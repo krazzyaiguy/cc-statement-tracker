@@ -292,42 +292,60 @@ async function callAI(provider, apiKey, model, prompt, base64, mimeType = "image
 // ─── RATE LIMIT HELPER ────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function callAIWithRetry(provider, apiKey, model, prompt, base64, mimeType, retries = 3) {
-  for (let i = 0; i < retries; i++) {
+async function callAIWithRetry(provider, apiKey, model, prompt, base64, mimeType, retries = 3, backupKey = null) {
+  // Build full key rotation list — primary + all backups
+  const allKeys = [apiKey];
+  if(backupKey){
+    if(Array.isArray(backupKey)) allKeys.push(...backupKey);
+    else allKeys.push(backupKey);
+  }
+  const validKeys = [...new Set(allKeys.filter(Boolean))];
+
+  let keyIndex = 0;
+  let attempts = 0;
+  const maxAttempts = retries * validKeys.length;
+
+  while(attempts < maxAttempts){
+    attempts++;
+    const currentKey = validKeys[keyIndex];
     try {
-      // Add 3s delay between every Gemini call to stay under 20 RPM
-      if (provider === "gemini" && i === 0) await sleep(3000);
-      return await callAI(provider, apiKey, model, prompt, base64, mimeType);
+      if (provider === "gemini" && attempts === 1) await sleep(3000);
+      return await callAI(provider, currentKey, model, prompt, base64, mimeType);
     } catch (err) {
       const msg = err.message || "";
-      // Check if rate limit error
-      const retryMatch = msg.match(/retry in (\d+(\.\d+)?)s/i);
-      if (retryMatch) {
-        const waitSec = Math.ceil(parseFloat(retryMatch[1])) + 2;
-        console.warn(`Rate limited — waiting ${waitSec}s before retry...`);
+      const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("exhausted");
+      if (isRateLimit) {
+        // Try next key
+        if(keyIndex < validKeys.length - 1){
+          keyIndex++;
+          console.warn(`Rate limit on key ${keyIndex} — switching to key ${keyIndex+1}...`);
+          continue;
+        }
+        // All keys exhausted — wait and restart rotation
+        const retryMatch = msg.match(/retry in (\d+(\.\d+)?)s/i);
+        const waitSec = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 2 : 60;
+        console.warn(`All ${validKeys.length} keys rate limited — waiting ${waitSec}s then retrying...`);
         await sleep(waitSec * 1000);
-        continue; // retry
+        keyIndex = 0; // restart from primary key
+        continue;
       }
-      throw err; // non-rate-limit error — rethrow
+      throw err; // non-rate-limit error
     }
   }
   throw new Error("Max retries exceeded after rate limit");
 }
-export async function callGroq(apiKey, base64, mimeType = "image/jpeg", providerOverride = null, modelOverride = null) {
-  // Determine provider + model
-  // providerOverride comes from settings.aiProvider; modelOverride from settings.aiModel
-  // Falls back to groq for backwards compatibility
+export async function callGroq(apiKey, base64, mimeType = "image/jpeg", providerOverride = null, modelOverride = null, backupKeys = null) {
   const provider = providerOverride || "groq";
   const model = modelOverride || AI_PROVIDERS[provider]?.defaultModel ||
     "meta-llama/llama-4-scout-17b-16e-instruct";
 
   // Pass 1: Extract
-  const first = await callAIWithRetry(provider, apiKey, model, EXTRACTION_PROMPT, base64, mimeType);
+  const first = await callAIWithRetry(provider, apiKey, model, EXTRACTION_PROMPT, base64, mimeType, 3, backupKeys);
 
-  // Pass 2: Verify (always — cheap insurance against digit misreads)
+  // Pass 2: Verify
   let result;
   try {
-    const verified = await callAIWithRetry(provider, apiKey, model, VERIFY_PROMPT(first), base64, mimeType);
+    const verified = await callAIWithRetry(provider, apiKey, model, VERIFY_PROMPT(first), base64, mimeType, 3, backupKeys);
     // Merge: prefer verified values for numeric fields (most likely to have errors)
     result = {
       ...first,
