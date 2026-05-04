@@ -71,11 +71,22 @@ export default function App(){
             console.log("[Firebase] Uploaded local vault to Firebase:", saved);
           }
 
-          if(fbPeople.length>0){ setPeople(fbPeople); console.log("[Firebase] Using Firebase people"); }
-          else if(localPeople.length>0){
-            setPeople(localPeople);
-            const saved=await savePeople(u.uid,localPeople);
-            console.log("[Firebase] Uploaded local people to Firebase:", saved);
+          // Merge Firebase + localStorage — never overwrite, always combine
+          const localPeople2 = JSON.parse(localStorage.getItem('cc_people_v1')||'[]');
+          if(fbPeople.length>0){
+            const fbNames = new Set(fbPeople.map(p=>(p.fullName||"").toUpperCase().trim()));
+            const localOnly = localPeople2.filter(p=>!fbNames.has((p.fullName||"").toUpperCase().trim()));
+            const merged = [...fbPeople, ...localOnly];
+            setPeople(merged);
+            if(localOnly.length>0){
+              console.log(`[Firebase] Merged ${localOnly.length} local-only people:`, localOnly.map(p=>p.fullName));
+              savePeople(u.uid, merged).catch(()=>{});
+            }
+            console.log("[Firebase] People loaded:", merged.length);
+          } else if(localPeople2.length>0){
+            setPeople(localPeople2);
+            savePeople(u.uid, localPeople2).catch(()=>{});
+            console.log("[Firebase] Uploaded local people:", localPeople2.length);
           }
 
           const localRecords = JSON.parse(localStorage.getItem('cc_records_v1')||'[]');
@@ -767,5 +778,3 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
   </>
   );
 }
-
-
