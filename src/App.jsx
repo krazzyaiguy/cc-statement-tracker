@@ -440,7 +440,7 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
   const unpaidRecs=records.filter(r=>!r.paid);
   const unpaidTotal=unpaidRecs.reduce((s,r)=>s+(r.dueAmount||0),0);
   const currency=records.find(r=>r.currency)?.currency||"";
-  const activeTabLabel = ""; // kept for future use
+
 
   return(
     <>
