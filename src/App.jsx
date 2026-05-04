@@ -440,7 +440,7 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
   const unpaidRecs=records.filter(r=>!r.paid);
   const unpaidTotal=unpaidRecs.reduce((s,r)=>s+(r.dueAmount||0),0);
   const currency=records.find(r=>r.currency)?.currency||"";
-  const TABS=[["dashboard","🏠 Dashboard"],["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["checklist","☑ Monthly"],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["milestone","🎯 Milestones"],["settings","⚙ Settings"]];
+  const activeTabLabel = ""; // kept for future use
 
   return(
     <>
@@ -496,10 +496,17 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
         )}
 
         {/* Tabs */}
-        <div className="tabs-sc" style={{marginBottom:22}}>
-          <div style={{display:"flex",gap:3,background:"#0d1424",borderRadius:10,padding:4,width:"max-content",minWidth:"100%"}}>
-            {TABS.map(([t,label])=>(
-              <button key={t} onClick={()=>setActiveTab(t)} style={{background:activeTab===t?"#1e40af":"none",color:activeTab===t?"#fff":"#475569",border:"none",borderRadius:7,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,fontWeight:500,whiteSpace:"nowrap",transition:"all .15s"}}>{label}</button>
+        <div style={{marginBottom:22}}>
+          {/* Row 1 — Main actions */}
+          <div style={{display:"flex",gap:3,flexWrap:"wrap",background:"#0d1424",borderRadius:"10px 10px 0 0",padding:"4px 4px 0 4px",borderBottom:"1px solid #1e293b"}}>
+            {[["dashboard","🏠 Dashboard"],["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["checklist","☑ Monthly"]].map(([t,label])=>(
+              <button key={t} onClick={()=>setActiveTab(t)} style={{background:activeTab===t?"#1e40af":"none",color:activeTab===t?"#fff":"#475569",border:"none",borderRadius:"7px 7px 0 0",padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:11,fontWeight:500,whiteSpace:"nowrap",transition:"all .15s"}}>{label}</button>
+            ))}
+          </div>
+          {/* Row 2 — Data & Settings */}
+          <div style={{display:"flex",gap:3,flexWrap:"wrap",background:"#080c14",borderRadius:"0 0 10px 10px",padding:"4px"}}>
+            {[["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["milestone","🎯 Milestones"],["settings","⚙ Settings"]].map(([t,label])=>(
+              <button key={t} onClick={()=>setActiveTab(t)} style={{background:activeTab===t?"#1e3a5f":"none",color:activeTab===t?"#93c5fd":"#334155",border:"none",borderRadius:7,padding:"5px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:10,fontWeight:500,whiteSpace:"nowrap",transition:"all .15s"}}>{label}</button>
             ))}
           </div>
         </div>
