@@ -197,6 +197,7 @@ export function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
               <input value={card.last4} onChange={e=>updateCard(i,"last4",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="Last 4" maxLength={4} style={{...S.input,width:80,letterSpacing:"0.2em",fontSize:14,fontWeight:700,textAlign:"center"}}/>
               <input value={card.prefix||""} onChange={e=>updateCard(i,"prefix",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="First 4" maxLength={4} title="Optional: first 4 digits of card (e.g. 4315)" style={{...S.input,width:70,letterSpacing:"0.1em",fontSize:11,color:"#475569"}}/>
               <input value={card.bankName} onChange={e=>updateCard(i,"bankName",e.target.value)} placeholder="Bank name (e.g. HDFC)" style={{...S.input,flex:1}}/>
+              <input value={card.nickname||""} onChange={e=>updateCard(i,"nickname",e.target.value)} placeholder="Nickname (e.g. Regalia)" title="Optional short name to identify this card" style={{...S.input,width:120,fontSize:11,color:"#a78bfa"}}/>
               {cards.length>1&&<button onClick={()=>removeCard(i)} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>}
             </div>
           ))}
@@ -266,6 +267,7 @@ export function PeoplePanel({people, uid, onAdd, onUpdate, onDelete}) {
                         <input value={card.last4} onChange={e=>updateEditCard(i,"last4",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="Last 4" maxLength={4} style={{...S.input,width:80,letterSpacing:"0.2em",fontSize:14,fontWeight:700,textAlign:"center"}}/>
                         <input value={card.prefix||""} onChange={e=>updateEditCard(i,"prefix",e.target.value.replace(/\D/g,"").slice(0,4))} placeholder="First 4" maxLength={4} title="Optional: first 4 digits (e.g. 4315)" style={{...S.input,width:70,letterSpacing:"0.1em",fontSize:11,color:"#475569"}}/>
                         <input value={card.bankName} onChange={e=>updateEditCard(i,"bankName",e.target.value)} placeholder="Bank name" style={{...S.input,flex:1}}/>
+                        <input value={card.nickname||""} onChange={e=>updateEditCard(i,"nickname",e.target.value)} placeholder="Nickname" title="Short name e.g. Regalia, Cashback" style={{...S.input,width:110,fontSize:11,color:"#a78bfa"}}/>
                         {editCards.length>1&&<button onClick={()=>removeEditCard(i)} style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>}
                       </div>
                     ))}
