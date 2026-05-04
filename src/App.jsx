@@ -8,11 +8,14 @@ import {
   loadVault, saveVault,
   loadPeople, savePeople,
   loadRecords, saveRecords,
-  loadMeta, saveMeta,
+  loadMeta, saveMeta, loadITR, saveITR, loadBankRules,
+  loadSharedBankRules, saveSharedBankRules,
 } from "./firebase";
 import { SetupScreen } from "./components/SetupScreen";
 import { S, Badge, PasswordModal, VaultPanel, PeoplePanel, BankRulesPanel, SettingsPanel } from "./components/Panels";
 import { ITRPanel } from "./components/ITRPanel";
+import { MonthlyChecklist } from "./components/MonthlyChecklist";
+import { Dashboard } from "./components/Dashboard";
 import { MilestonePanel } from "./components/MilestonePanel";
 import { GmailSyncPanel } from "./components/GmailSync";
 import { DEFAULT_BANK_RULES } from "./utils/passwords";
@@ -51,8 +54,9 @@ export default function App(){
         console.log("[Firebase] Signed in as:", u.email, "uid:", u.uid);
         try{
           console.log("[Firebase] Loading data from Firestore...");
-          const [fbVault, fbPeople, fbRecords, fbMeta] = await Promise.all([
-            loadVault(u.uid), loadPeople(u.uid), loadRecords(u.uid), loadMeta(u.uid)
+          const [fbVault, fbPeople, fbRecords, fbMeta, fbITR, fbBankRules] = await Promise.all([
+            loadVault(u.uid), loadPeople(u.uid), loadRecords(u.uid), loadMeta(u.uid),
+            loadITR(u.uid), loadBankRules(u.uid)
           ]);
           console.log("[Firebase] Loaded → vault:", fbVault.length, "people:", fbPeople.length, "records:", fbRecords.length, "meta:", fbMeta);
 
@@ -86,6 +90,35 @@ export default function App(){
 
           if(fbMeta.settings) setSettings(s=>({...s,...fbMeta.settings}));
           if(fbMeta.processedIds) setProcessedIds(fbMeta.processedIds);
+
+          // Load ITR from Firebase
+          if(fbITR && Object.keys(fbITR).length>0){
+            setItrData(fbITR);
+            console.log("[Firebase] Using Firebase ITR data");
+          } else {
+            const localITR = JSON.parse(localStorage.getItem('cc_itr_v1')||'{}');
+            if(Object.keys(localITR).length>0){
+              setItrData(localITR);
+              saveITR(u.uid, localITR).then(()=>console.log("[Firebase] Uploaded local ITR to Firebase"));
+            }
+          }
+
+          // Load BankRules — shared global rules first, fallback to per-user, then localStorage
+          const sharedRules = await loadSharedBankRules();
+          if(sharedRules && sharedRules.length>0){
+            setBankRules(sharedRules);
+            console.log("[Firebase] Using shared global bank rules:", sharedRules.length);
+          } else if(fbBankRules && fbBankRules.length>0){
+            setBankRules(fbBankRules);
+            // Migrate per-user rules to shared so everyone benefits
+            saveSharedBankRules(fbBankRules).then(()=>console.log("[Firebase] Migrated per-user rules to shared"));
+          } else {
+            const localRules = JSON.parse(localStorage.getItem('cc_bank_rules_v1')||'null');
+            if(localRules && localRules.length>0){
+              setBankRules(localRules);
+              saveSharedBankRules(localRules).then(()=>console.log("[Firebase] Uploaded local bank rules to shared"));
+            }
+          }
           console.log("[Firebase] All data loaded successfully ✓");
         }catch(e){
           console.error("[Firebase] Load FAILED:", e.code, e.message);
@@ -124,8 +157,17 @@ export default function App(){
     }
   },[people,user]); // eslint-disable-line
 
-  // Save bankRules to localStorage
-  useEffect(()=>{ try{localStorage.setItem(BANK_RULES_KEY,JSON.stringify(bankRules));}catch{} },[bankRules]);
+  // Save bankRules to localStorage + shared Firebase (global for all users)
+  useEffect(()=>{
+    try{localStorage.setItem(BANK_RULES_KEY,JSON.stringify(bankRules));}catch{}
+    if(user) saveSharedBankRules(bankRules).catch(()=>{});
+  },[bankRules,user]); // eslint-disable-line
+
+  // Save ITR to localStorage + Firebase
+  useEffect(()=>{
+    try{localStorage.setItem('cc_itr_v1',JSON.stringify(itrData));}catch{}
+    if(user && Object.keys(itrData).length>0) saveITR(user.uid, itrData).catch(()=>{});
+  },[itrData,user]); // eslint-disable-line
 
   const prevVaultRef=useRef(null);
   useEffect(()=>{
@@ -180,9 +222,64 @@ export default function App(){
   const handleRetentionChange=(days)=>{ const s={...settings,retentionDays:days}; setSettings(s); ls.set(SETTINGS_KEY,s); };
 
   // Hooks before early returns
-  const handleNewRecords=useCallback((newRecs)=>{
-    setRecords(prev=>{const ex=new Set(prev.map(r=>r.id));return[...prev,...newRecs.filter(r=>!ex.has(r.id))];});
+  // ── Search/filter state ────────────────────────────────────────────────────
+  const [searchQuery,  setSearchQuery]  = useState("");
+  const [filterBank,   setFilterBank]   = useState("");
+  const [filterPerson, setFilterPerson] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+
+  // ── Due date notifications ─────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!records.length||!("Notification" in window)) return;
+    const send = () => {
+      if(Notification.permission!=="granted") return;
+      records.filter(r=>!r.paid).forEach(r=>{
+        const d=parseDate(r.dueDate);
+        if(!d) return;
+        const days=Math.ceil((d-new Date().setHours(0,0,0,0))/86400000);
+        if(days>3||days<0) return;
+        const key=`notified_${r.id}_${days}`;
+        if(localStorage.getItem(key)) return;
+        const msg=days===0?`⚠ DUE TODAY: ${r.cardholderName} ${r.bankName} ••••${r.lastFourDigits} ₹${Number(r.dueAmount||0).toLocaleString("en-IN")}`:`📅 Due in ${days}d: ${r.cardholderName} ${r.bankName} ••••${r.lastFourDigits} ₹${Number(r.dueAmount||0).toLocaleString("en-IN")}`;
+        new Notification("CC Statement Tracker",{body:msg,icon:"/favicon.ico"});
+        localStorage.setItem(key,"1");
+      });
+    };
+    send();
+    const t=setInterval(send,3600000);
+    return()=>clearInterval(t);
+  },[records]); // eslint-disable-line
+
+  // Smart duplicate detection — same person + bank + last4 + same statement month
+  const isDuplicate = useCallback((newRec, existing) => {
+    return existing.some(r => {
+      const sameId   = r.id === newRec.id;
+      const samePerson = (r.cardholderName||"").toUpperCase().trim() === (newRec.cardholderName||"").toUpperCase().trim();
+      const sameBank   = (r.bankName||"").toUpperCase().trim() === (newRec.bankName||"").toUpperCase().trim();
+      const sameLast4  = (r.lastFourDigits||"") === (newRec.lastFourDigits||"");
+      // Compare statement month
+      const d1 = r.statementDate||r.dueDate||"";
+      const d2 = newRec.statementDate||newRec.dueDate||"";
+      const sameMonth = d1.slice(3,10) === d2.slice(3,10) && d1.slice(3,10) !== "";
+      return sameId || (samePerson && sameBank && sameLast4 && sameMonth);
+    });
   },[]);
+
+  const handleNewRecords = useCallback((newRecs) => {
+    setRecords(prev => {
+      const toAdd = [];
+      const skipped = [];
+      newRecs.forEach(r => {
+        if(isDuplicate(r, [...prev, ...toAdd])){
+          skipped.push(r);
+        } else {
+          toAdd.push(r);
+        }
+      });
+      if(skipped.length>0) console.log(`[Duplicate] Skipped ${skipped.length} duplicate record(s):`, skipped.map(r=>`${r.cardholderName} ••••${r.lastFourDigits}`));
+      return [...prev, ...toAdd];
+    });
+  },[isDuplicate]);
   const handleProcessed=useCallback((id)=>setProcessedIds(prev=>prev.includes(id)?prev:[...prev,id]),[]);
 
   if(!authReady) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080c14",color:"#475569",fontFamily:"'DM Mono',monospace",fontSize:13}}>⟳ Loading…</div>;
@@ -226,7 +323,6 @@ export default function App(){
     return {label:"PENDING",color:"#94a3b8",bg:"#1e293b",urgent:false};
   };
 
-  // Sort records: unpaid by due date ascending, paid at bottom
   const sortedRecords = [...records].sort((a,b)=>{
     if(a.paid&&!b.paid) return 1;
     if(!a.paid&&b.paid) return -1;
@@ -236,6 +332,19 @@ export default function App(){
     if(!db) return -1;
     return da-db;
   });
+
+  // Filtered records for tracker view
+  const filteredRecords = sortedRecords.filter(r=>{
+    const q = searchQuery.toLowerCase();
+    if(q && !`${r.cardholderName} ${r.bankName} ${r.lastFourDigits} ${r.dueDate}`.toLowerCase().includes(q)) return false;
+    if(filterBank   && (r.bankName||"").toUpperCase()!==filterBank)   return false;
+    if(filterPerson && (r.cardholderName||"").toUpperCase()!==filterPerson) return false;
+    if(filterStatus==="paid"   && !r.paid)  return false;
+    if(filterStatus==="unpaid" && r.paid)   return false;
+    return true;
+  });
+  const uniqueBanks  = [...new Set(records.map(r=>(r.bankName||"").toUpperCase()).filter(Boolean))].sort();
+  const uniquePeople = [...new Set(records.map(r=>(r.cardholderName||"").toUpperCase()).filter(Boolean))].sort();
 
   const handleTogglePaid=(r)=>setRecords(prev=>prev.map(rec=>rec.id===r.id?{...rec,paid:!rec.paid,paidAmount:!rec.paid?rec.dueAmount:0}:rec));
   const handleDeleteRecord=(r)=>setRecords(prev=>prev.filter(rec=>rec.id!==r.id));
@@ -331,7 +440,7 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
   const unpaidRecs=records.filter(r=>!r.paid);
   const unpaidTotal=unpaidRecs.reduce((s,r)=>s+(r.dueAmount||0),0);
   const currency=records.find(r=>r.currency)?.currency||"";
-  const TABS=[["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["milestone","🎯 Milestones"],["settings","⚙ Settings"]];
+  const TABS=[["dashboard","🏠 Dashboard"],["gmail","⚡ Gmail Sync"],["upload","📂 Upload"],["tracker",`📋 Tracker (${records.length})`],["checklist","☑ Monthly"],["people",`👥 People (${people.length})`],["vault",`🔐 Vault (${vault.length})`],["bankrules",`🏦 Bank Rules (${bankRules.length})`],["itr","💰 ITR Tracker"],["milestone","🎯 Milestones"],["settings","⚙ Settings"]];
 
   return(
     <>
@@ -433,6 +542,32 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
             <div style={{textAlign:"center",color:"#1e293b",padding:"48px 0",fontSize:12}}><div style={{fontSize:36,marginBottom:10,opacity:.3}}>📋</div>No statements yet.</div>
           ):(
             <>
+              {/* Search & Filter Bar */}
+              <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+                <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+                  placeholder="🔍 Search name, bank, last4, date..."
+                  style={{...S.input,flex:1,minWidth:180,padding:"8px 12px",fontSize:12}}/>
+                <select value={filterPerson} onChange={e=>setFilterPerson(e.target.value)} style={{...S.input,width:"auto",padding:"8px 10px",fontSize:11,cursor:"pointer"}}>
+                  <option value="">All People</option>
+                  {uniquePeople.map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+                <select value={filterBank} onChange={e=>setFilterBank(e.target.value)} style={{...S.input,width:"auto",padding:"8px 10px",fontSize:11,cursor:"pointer"}}>
+                  <option value="">All Banks</option>
+                  {uniqueBanks.map(b=><option key={b} value={b}>{b}</option>)}
+                </select>
+                <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{...S.input,width:"auto",padding:"8px 10px",fontSize:11,cursor:"pointer"}}>
+                  <option value="">All Status</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="paid">Paid</option>
+                </select>
+                {(searchQuery||filterBank||filterPerson||filterStatus)&&(
+                  <button onClick={()=>{setSearchQuery("");setFilterBank("");setFilterPerson("");setFilterStatus("");}}
+                    style={{background:"none",border:"1px solid #334155",color:"#64748b",borderRadius:6,padding:"7px 12px",cursor:"pointer",fontSize:11}}>✕ Clear</button>
+                )}
+              </div>
+              {filteredRecords.length===0&&(
+                <div style={{textAlign:"center",color:"#334155",padding:"24px",fontSize:12}}>No records match your filters.</div>
+              )}
               <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12,gap:10,flexWrap:"wrap"}}>
                 <button className="abtn" onClick={()=>exportToExcel(records)} style={S.btn("#15803d")}>⬇ Export Excel</button>
                 <button className="abtn" onClick={()=>{
@@ -483,7 +618,7 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:640}}>
                   <thead><tr style={{background:"#0d1424"}}>{["#","Cardholder","Bank","Card","Due Date","Amount","Paid","Balance","Pmts Rcvd","Src","Status",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:"#334155",fontWeight:500,fontSize:9,letterSpacing:"0.06em",textTransform:"uppercase",borderBottom:"1px solid #1e293b",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {sortedRecords.map((r,i)=>(
+                    {filteredRecords.map((r,i)=>(
                       <tr key={r.firestoreId||r.id} className="row-h" style={{background:r.paid?"#071a0f":"#0a0e1a",opacity:r.paid?.6:1}}>
                         <td style={{padding:"9px 10px",color:"#334155"}}>{i+1}</td>
                         <td style={{padding:"6px 10px",color:"#e2e8f0",fontWeight:500,whiteSpace:"nowrap"}} onClick={()=>startEdit(r.id,"cardholderName",r.cardholderName)}>
@@ -500,6 +635,7 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
                           {editCell?.id===r.id&&editCell.field==="lastFourDigits"
                             ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value.replace(/\D/g,"").slice(0,4))} onBlur={()=>commitEdit(r)} onKeyDown={e=>e.key==="Enter"&&commitEdit(r)} maxLength={4} style={{background:"#1e293b",border:"1px solid #3b82f6",borderRadius:4,color:"#60a5fa",padding:"2px 6px",fontFamily:"'DM Mono',monospace",fontSize:12,width:60,letterSpacing:"0.2em",textAlign:"center"}}/>
                             :<span style={{background:"#1e293b",padding:"2px 6px",borderRadius:4,color:"#60a5fa",fontWeight:600,cursor:"text",borderBottom:"1px dashed #334155"}}>{r.lastFourDigits?"••••"+r.lastFourDigits:"— click"}</span>}
+                          {(()=>{const pp=people.find(p=>p.cards?.some(c=>c.last4===r.lastFourDigits&&(c.bankName||"").toUpperCase().slice(0,4)===(r.bankName||"").toUpperCase().slice(0,4)));const card=pp?.cards?.find(c=>c.last4===r.lastFourDigits);return card?.nickname?<span style={{marginLeft:5,color:"#a78bfa",fontSize:9,fontStyle:"italic"}}>{card.nickname}</span>:null;})()}
                         </td>
                         <td style={{padding:"6px 10px",whiteSpace:"nowrap"}} onClick={()=>!r.paid&&startEdit(r.id,"dueDate",r.dueDate)}>
                           {editCell?.id===r.id&&editCell.field==="dueDate"
@@ -578,6 +714,8 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
 
         {/* Settings */}
         {activeTab==="itr"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>💰 ITR Repayment Tracker</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Track credit card repayments per person per bank. Banks report ≥₹10L to IT dept.</p><ITRPanel itrData={itrData} setItrData={setItrData}/></div>}
+        {activeTab==="dashboard"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>🏠 Dashboard</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Overview of all outstanding dues, upcoming payments, and monthly trends.</p><Dashboard records={records} people={people}/></div>}
+        {activeTab==="checklist"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>☑ Monthly Card Checklist</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Track every card each month — know if app tracked it, last4 is correct, statement read, and payment done.</p><MonthlyChecklist people={people} records={records}/></div>}
 
         {activeTab==="milestone"&&<div style={{...S.card,padding:"24px"}}><h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>🎯 Milestone Tracker</h2><p style={{color:"#334155",fontSize:11,marginBottom:20}}>Track annual fee waivers, cashback tiers, reward milestones per card. Each card tracks from its own renewal date.</p><MilestonePanel/></div>}
 
@@ -587,6 +725,20 @@ const entry    = { amount:paid, date:entryDate, time:now.toLocaleTimeString("en-
           <h2 style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,marginBottom:4}}>Settings</h2>
           <p style={{color:"#334155",fontSize:11,marginBottom:20}}>Update API keys or reset all data.</p>
           <SettingsPanel settings={settings} onUpdate={setSettings} onReset={()=>{if(window.confirm("Reset ALL data?")){ls.del(SETTINGS_KEY);ls.del("cc_gmail_token");ls.del("cc_gmail_email");window.location.reload();}}}/>
+          {"Notification" in window&&(
+            <div style={{marginTop:20,padding:"14px 16px",background:"#0a0e1a",border:"1px solid #1e293b",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{color:"#94a3b8",fontSize:12,fontWeight:600}}>🔔 Due Date Notifications</div>
+                <div style={{color:"#475569",fontSize:10,marginTop:2}}>Get browser alerts 3 days before payment due</div>
+              </div>
+              {Notification.permission==="granted"
+                ? <span style={{color:"#4ade80",fontSize:11}}>✅ Enabled</span>
+                : Notification.permission==="denied"
+                  ? <span style={{color:"#f87171",fontSize:11}}>❌ Blocked in browser</span>
+                  : <button onClick={()=>Notification.requestPermission()} style={S.btn("#1d4ed8")}>Enable</button>
+              }
+            </div>
+          )}
           {user&&<div style={{marginTop:24,paddingTop:20,borderTop:"1px solid #0f172a"}}>
             <div style={{color:"#475569",fontSize:11,marginBottom:12}}>🔥 Firebase Debug</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
