@@ -353,7 +353,11 @@ export async function gmailFetch(path, token) {
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/${path}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
-  if (!res.ok) throw new Error(`Gmail API ${res.status}`);
+  if (!res.ok) {
+    let reason = "";
+    try { const j = await res.json(); reason = j?.error?.message || j?.error?.status || ""; } catch {}
+    throw new Error(`Gmail API ${res.status}${reason ? ": " + reason : ""}`);
+  }
   return res.json();
 }
 
@@ -404,4 +408,3 @@ export async function downloadAttachment(msgId, attId, token) {
   const d = await gmailFetch(`users/me/messages/${msgId}/attachments/${attId}`, token);
   return d.data.replace(/-/g, "+").replace(/_/g, "/");
 }
-
