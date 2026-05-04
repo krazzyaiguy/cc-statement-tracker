@@ -89,7 +89,47 @@ export async function savePeople(uid, entries) { return saveDoc(uid, "people", e
 export async function loadRecords(uid)          { return loadDoc(uid, "records"); }
 export async function saveRecords(uid, entries) { return saveDoc(uid, "records", entries); }
 
-// ── META (settings + processed IDs) ──────────────────────────────────────────
+// ── ITR DATA ──────────────────────────────────────────────────────────────────
+export async function loadITR(uid) {
+  try {
+    const snap = await getDoc(dataDoc(uid, "itr"));
+    return snap.exists() ? (snap.data().itrData || {}) : {};
+  } catch(e) {
+    console.error("Firestore load itr failed:", e);
+    return {};
+  }
+}
+
+export async function saveITR(uid, itrData) {
+  try {
+    await setDoc(dataDoc(uid, "itr"), { itrData, updatedAt: new Date().toISOString() });
+    return true;
+  } catch(e) {
+    console.error("Firestore save itr failed:", e);
+    return false;
+  }
+}
+
+// ── BANK RULES ────────────────────────────────────────────────────────────────
+export async function loadBankRules(uid) {
+  try {
+    const snap = await getDoc(dataDoc(uid, "bankRules"));
+    return snap.exists() ? (snap.data().entries || null) : null;
+  } catch(e) {
+    console.error("Firestore load bankRules failed:", e);
+    return null;
+  }
+}
+
+export async function saveBankRules(uid, entries) {
+  try {
+    await setDoc(dataDoc(uid, "bankRules"), { entries, updatedAt: new Date().toISOString() });
+    return true;
+  } catch(e) {
+    console.error("Firestore save bankRules failed:", e);
+    return false;
+  }
+}
 export async function loadMeta(uid) {
   try {
     const snap = await getDoc(dataDoc(uid, "meta"));
@@ -102,4 +142,29 @@ export async function saveMeta(uid, data) {
     await setDoc(dataDoc(uid, "meta"), { ...data, updatedAt: new Date().toISOString() });
     return true;
   } catch(e) { return false; }
+}
+
+// ── SHARED BANK RULES (global — same for all users) ───────────────────────────
+// Stored at /shared/bankRules — readable/writable by any signed-in user
+export async function loadSharedBankRules() {
+  try {
+    const snap = await getDoc(doc(db, "shared", "bankRules"));
+    return snap.exists() ? (snap.data().entries || null) : null;
+  } catch(e) {
+    console.error("Firestore load sharedBankRules failed:", e);
+    return null;
+  }
+}
+
+export async function saveSharedBankRules(entries) {
+  try {
+    await setDoc(doc(db, "shared", "bankRules"), {
+      entries,
+      updatedAt: new Date().toISOString()
+    });
+    return true;
+  } catch(e) {
+    console.error("Firestore save sharedBankRules failed:", e);
+    return false;
+  }
 }
