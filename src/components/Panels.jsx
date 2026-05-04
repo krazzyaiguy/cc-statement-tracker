@@ -427,7 +427,16 @@ export function BankRulesPanel({ rules, onUpdate }) {
 }
 
 export function SettingsPanel({settings,onUpdate,onReset}){
-  const[geminiKey,setGeminiKey]=useState(settings.geminiKey||"");
+  // Support unlimited Gemini keys — stored as array
+  const initKeys = ()=>{
+    const keys = settings.geminiKeys || [];
+    if(keys.length===0){
+      if(settings.geminiKey) keys.push(settings.geminiKey);
+      if(settings.geminiKey2) keys.push(settings.geminiKey2);
+    }
+    return keys.length>0 ? keys : [""];
+  };
+  const[geminiKeys,setGeminiKeys]=useState(initKeys);
   const[aiProvider,setAiProvider]=useState(settings.aiProvider||"groq");
   const[aiModel,setAiModel]=useState(settings.aiModel||"");
   const[googleClientId,setGoogleClientId]=useState(settings.googleClientId||"");
@@ -443,7 +452,8 @@ export function SettingsPanel({settings,onUpdate,onReset}){
   const PROVIDER_LINKS={groq:"https://console.groq.com/keys",gemini:"https://aistudio.google.com/apikey",openai:"https://platform.openai.com/api-keys",claude:"https://console.anthropic.com/keys",mistral:"https://console.mistral.ai/api-keys"};
 
   const save=()=>{
-    onUpdate({...settings,geminiKey:geminiKey.trim(),aiProvider,aiModel:aiModel||(PROVIDER_MODELS[aiProvider]?.[0]||""),googleClientId:googleClientId.trim()});
+    const cleanKeys = geminiKeys.map(k=>k.trim()).filter(Boolean);
+    onUpdate({...settings,geminiKey:cleanKeys[0]||"",geminiKey2:cleanKeys[1]||"",geminiKeys:cleanKeys,aiProvider,aiModel:aiModel||(PROVIDER_MODELS[aiProvider]?.[0]||""),googleClientId:googleClientId.trim()});
     setSaved(true);setTimeout(()=>setSaved(false),2000);
   };
 
@@ -464,7 +474,26 @@ export function SettingsPanel({settings,onUpdate,onReset}){
           {(PROVIDER_MODELS[aiProvider]||[]).map(m=><option key={m} value={m} style={{background:"#0d1424"}}>{m}</option>)}
         </select>
         <label style={S.label}>API Key</label>
-        <input type="password" value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} placeholder={aiProvider==="groq"?"gsk_...":aiProvider==="gemini"?"AIza...":aiProvider==="claude"?"sk-ant-...":"sk-..."} style={{...S.input,marginBottom:6}}/>
+        {aiProvider==="gemini" ? (
+          <div>
+            {geminiKeys.map((key,i)=>(
+              <div key={i} style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
+                <span style={{color:"#334155",fontSize:10,minWidth:60,fontFamily:"'DM Mono',monospace"}}>Key {i+1}{i===0?" (Primary)":` (Backup ${i})`}</span>
+                <input type="password" value={key} onChange={e=>{const k=[...geminiKeys];k[i]=e.target.value;setGeminiKeys(k);}}
+                  placeholder="AIza..." style={{...S.input,flex:1,marginBottom:0}}/>
+                {geminiKeys.length>1&&<button onClick={()=>setGeminiKeys(prev=>prev.filter((_,j)=>j!==i))}
+                  style={{background:"none",border:"none",color:"#f87171",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>}
+              </div>
+            ))}
+            <button onClick={()=>setGeminiKeys(prev=>[...prev,""])}
+              style={{background:"none",border:"1px dashed #1e3a5f",color:"#3b82f6",borderRadius:6,padding:"5px 12px",cursor:"pointer",fontSize:11,width:"100%",marginBottom:6}}>
+              + Add another Gemini key
+            </button>
+            <div style={{color:"#334155",fontSize:10}}>Keys auto-rotate when one hits rate limit</div>
+          </div>
+        ) : (
+          <input type="password" value={geminiKeys[0]||""} onChange={e=>setGeminiKeys([e.target.value])} placeholder={aiProvider==="groq"?"gsk_...":aiProvider==="claude"?"sk-ant-...":"sk-..."} style={{...S.input,marginBottom:6}}/>
+        )}
         <div style={{color:"#334155",fontSize:10}}><a href={PROVIDER_LINKS[aiProvider]} target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>{PROVIDER_LINKS[aiProvider].replace("https://","")}</a></div>
       </div>
       <div style={{marginBottom:24}}><label style={S.label}>Google OAuth Client ID</label><input type="text" value={googleClientId} onChange={e=>setGoogleClientId(e.target.value)} placeholder="xxxxxxx.apps.googleusercontent.com" style={{...S.input,marginBottom:6}}/></div>
@@ -477,5 +506,3 @@ export function SettingsPanel({settings,onUpdate,onReset}){
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-
-
